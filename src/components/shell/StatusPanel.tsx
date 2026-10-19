@@ -9,7 +9,7 @@ import type { AgentId, AppState, Approval, Run, Tone } from '../../lib/types';
 import { actions } from '../../state/actions';
 import { agentActivity, currentRun, gateway, openRuns, pendingApprovals, runLabel, stepProgress, wallMs } from '../../state/selectors';
 import { shallow, useApp } from '../../state/store';
-import { AgentAvatar, Badge, EmptyState, IconButton, Meter, SimTag, Sparkline, StatusChip, cx } from '../ui';
+import { AgentAvatar, Badge, EmptyState, IconButton, Meter, EngineTag, SimTag, Sparkline, StatusChip, cx } from '../ui';
 import { ApprovalCard } from './ApprovalCard';
 import { DRAWER_QUERY } from './queries';
 
@@ -132,6 +132,12 @@ function RunSection({ runId, taskView, viewTaskId }: { runId: string; taskView: 
 
 function AgentRow({ runId, agentId }: { runId: string; agentId: AgentId }) {
   const agent = useApp((s) => s.agents.find((a) => a.id === agentId));
+  // Real runs: every agent runs on the task's model, not the demo roster's configured one.
+  const engineModel = useApp((s) => {
+    const r = s.runs[runId];
+    const e = r?.source === 'live' ? s.tasks[r.taskId]?.engine : undefined;
+    return e ? (e.model || e.label) : undefined;
+  });
   const activity = useApp((s) => agentActivity(s, s.runs[runId], agentId));
   const liveText = useApp((s) => {
     const r = s.runs[runId];
@@ -148,7 +154,7 @@ function AgentRow({ runId, agentId }: { runId: string; agentId: AgentId }) {
           <StatusChip meta={meta} size="sm" />
         </div>
         <p className="status-panel__agent-text">{liveText ?? '待命'}</p>
-        <p className="status-panel__agent-model">{agent.model}</p>
+        <p className="status-panel__agent-model">{engineModel ?? agent.model}</p>
       </div>
     </li>
   );
@@ -169,6 +175,26 @@ function AgentSection({ runId }: { runId: string }) {
 /* ───────────── 模型 ───────────── */
 
 function ModelSection() {
+  const engine = useApp((s) => (s.view === 'task' && s.selectedTaskId ? s.tasks[s.selectedTaskId]?.engine : undefined));
+  if (engine) {
+    return (
+      <Section title="模型" right={<EngineTag label={engine.label} compact />}>
+        <dl className="kv">
+          <dt>服务</dt>
+          <dd>{engine.label.split(' · ')[0]}</dd>
+          <dt>方式</dt>
+          <dd>{engine.auth === 'api' ? 'API 密钥' : engine.label.split(' · ')[1] ?? '命令行'}</dd>
+          <dt>模型</dt>
+          <dd className="mono status-panel__model">{engine.model || '工具默认'}</dd>
+        </dl>
+        {engine.cwd && <p className="status-panel__muted mono truncate" title={engine.cwd}>{engine.cwd}</p>}
+      </Section>
+    );
+  }
+  return <GatewaySection />;
+}
+
+function GatewaySection() {
   const gw = useApp(gateway);
   const model = useApp((s) => s.agents.find((a) => a.id === 'orchestrator')?.model);
   // No gateway configured also means nothing real is being called.
@@ -202,8 +228,17 @@ function ModelSection() {
 
 function ContextSection({ runId }: { runId: string }) {
   const usage = useApp((s) => s.runs[runId]?.usage);
+  const cli = useApp((s) => { const r = s.runs[runId]; return r?.source === 'live' && s.tasks[r.taskId]?.engine?.auth === 'cli'; });
   const source = useApp((s) => s.runs[runId]?.source ?? 'simulated');
   if (!usage) return null;
+  if (!usage.contextLimit || (cli && !usage.contextUsed)) {
+    return (
+      <Section title="上下文" right={<SimTag source={source} compact />}>
+        <p className="status-panel__figure"><span className="mono tabular">窗口 {tokens(usage.contextLimit || 1_000_000)}</span></p>
+        <p className="status-panel__muted">这个命令行 Agent 不报告每次请求的上下文用量，由它自己管理和压缩。</p>
+      </Section>
+    );
+  }
   const pct = percent(usage.contextUsed, usage.contextLimit);
   const tone: Tone = pct > 90 ? 'danger' : pct > 75 ? 'warning' : 'running';
   return (
@@ -279,6 +314,7 @@ function ApprovalsSection({ approvals, innerRef, flash }: { approvals: Approval[
 export function StatusPanel() {
   const runId = useApp(panelRunId);
   const taskView = useApp((s) => s.view === 'task');
+  const chatView = useApp((st) => (st.view === 'task' && st.selectedTaskId ? st.tasks[st.selectedTaskId]?.kind === 'chat' : false));
   const viewTaskId = useApp((s) => (s.view === 'task' ? s.selectedTaskId : undefined));
   const approvals = useApp(pendingApprovals, shallow);
   const drawerOpen = useApp((s) => s.statusDrawerOpen);
@@ -377,7 +413,9 @@ export function StatusPanel() {
           <RunSection runId={runId} taskView={taskView} viewTaskId={viewTaskId} />
         ) : (
           <Section title="运行">
-            {taskView ? (
+            {taskView && chatView ? (
+              <EmptyState compact icon={Radar} title="闲聊没有运行" body="闲聊只是对话，不会读写文件或执行命令。要动手做事，新建一个「工作」。" />
+            ) : taskView ? (
               <EmptyState compact icon={Radar} title="这个任务还没有运行" body="在工作区点「开始」后，这里会显示运行状态。" />
             ) : (
               <EmptyState compact icon={Radar} title="没有进行中的运行" body="开始一个任务后，这里会显示运行状态。" />

@@ -9,6 +9,7 @@ import { currentRun, latestRun } from '../../state/selectors';
 import { shallow, useApp } from '../../state/store';
 import { SimTag, Tabs, tabPanelProps, type TabItem } from '../ui';
 import { ArtifactsView } from './ArtifactsView';
+import { ChatWorkspace } from './ChatWorkspace';
 import { Conversation } from './Conversation';
 import { GoalCard } from './GoalCard';
 import { PlanView } from './PlanView';
@@ -20,8 +21,10 @@ import type { WorkspaceTab } from '../../lib/types';
 
 export function Workspace() {
   const taskId = useApp((s) => (s.selectedTaskId && s.tasks[s.selectedTaskId] ? s.selectedTaskId : undefined));
+  const chat = useApp((s) => (taskId ? s.tasks[taskId]?.kind === 'chat' : false));
   // Keyed by task, so drafts, selections and scroll state never leak from one task into another.
-  return taskId ? <TaskWorkspace key={taskId} taskId={taskId} /> : null;
+  if (!taskId) return null;
+  return chat ? <ChatWorkspace key={taskId} taskId={taskId} /> : <TaskWorkspace key={taskId} taskId={taskId} />;
 }
 
 function TaskWorkspace({ taskId }: { taskId: string }) {
@@ -69,7 +72,7 @@ function TaskWorkspace({ taskId }: { taskId: string }) {
         <section className="panel ws-main" aria-label="任务内容">
           <div className="panel__header panel__header--energy ws-main__bar">
             <Tabs idBase="ws" label="任务内容" items={tabs} value={tab} onChange={actions.setWorkspaceTab} />
-            {source && <SimTag source={source} />}
+            {source && source !== 'live' && <SimTag source={source} />}
           </div>
           {/* The conversation stays mounted (hidden) so the draft and scroll position survive tab switches. */}
           <div {...tabPanelProps('ws', 'conversation')} tabIndex={undefined} className="ws-main__panel" hidden={tab !== 'conversation'}>

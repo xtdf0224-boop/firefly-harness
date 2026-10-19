@@ -9,3 +9,4 @@ Thumbs.db
 assets-src/
 # Intermediate icon render (build/icon.ico and build/icon.png are what the build uses).
 build/icon-1024.png
+*.tsbuildinfo

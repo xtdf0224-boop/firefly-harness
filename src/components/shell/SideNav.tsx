@@ -1,7 +1,7 @@
 /* 左侧导航：品牌与演示模式标记、新建任务、主导航、最近任务、视觉模式切换与收起。
    紧凑态（手动收起，或视口 < 960px）只显示图标；< 640px 时变成顶部横条（见 shell.css）。 */
 import {
-  Bot, Circle, Eye, FlaskConical, History, ListTodo, PanelLeftClose, PanelLeftOpen, PanelRight, Plug, Plus, Settings, Shield, Sparkles, type LucideIcon,
+  Bot, Circle, Cpu, Eye, FlaskConical, History, ListTodo, MessageCircle, PanelLeftClose, PanelLeftOpen, PanelRight, Plug, Plus, Settings, Shield, Sparkles, type LucideIcon,
 } from 'lucide-react';
 import { useCallback, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -9,6 +9,7 @@ import { useMedia } from '../../lib/hooks';
 import { RUN_STATUS, type StatusMeta } from '../../lib/status';
 import type { ViewId, VisualMode } from '../../lib/types';
 import { actions } from '../../state/actions';
+import { readiness, PROVIDERS } from '../../lib/providers';
 import { openRuns, pendingApprovals, taskStatus } from '../../state/selectors';
 import { shallow, useApp } from '../../state/store';
 import { WingMark } from '../decor/WingMark';
@@ -21,8 +22,9 @@ const NAV_ENTRIES: NavEntry[] = [
   { view: 'tasks',    label: '任务列表',   icon: ListTodo, key: '2' },
   { view: 'agents',   label: 'Agent',      icon: Bot,      key: '3' },
   { view: 'tools',    label: '工具与连接', icon: Plug,     key: '4' },
-  { view: 'history',  label: '运行历史',   icon: History,  key: '5' },
-  { view: 'settings', label: '设置',       icon: Settings, key: '6' },
+  { view: 'models',   label: '模型接入',   icon: Cpu,      key: '5' },
+  { view: 'history',  label: '运行历史',   icon: History,  key: '6' },
+  { view: 'settings', label: '设置',       icon: Settings, key: '7' },
 ];
 
 const MODE_OPTIONS: Array<{ value: VisualMode; label: string; icon: LucideIcon; hint: string }> = [
@@ -32,6 +34,7 @@ const MODE_OPTIONS: Array<{ value: VisualMode; label: string; icon: LucideIcon; 
 
 /** A task that has not been started has no run, so it has no entry in RUN_STATUS. */
 const DRAFT_META: StatusMeta = { label: '未开始', tone: 'neutral', icon: Circle };
+const CHAT_META: StatusMeta = { label: '闲聊', tone: 'info', icon: MessageCircle };
 
 function NavItem({ entry, active, note, badge }: { entry: NavEntry; active: boolean; note?: string; badge?: ReactNode }) {
   const Icon = entry.icon;
@@ -55,9 +58,10 @@ function NavItem({ entry, active, note, badge }: { entry: NavEntry; active: bool
 function RecentTask({ id }: { id: string }) {
   const title = useApp((s) => s.tasks[id]?.title);
   const status = useApp((s) => { const t = s.tasks[id]; return t ? taskStatus(s, t) : undefined; });
+  const chat = useApp((s) => s.tasks[id]?.kind === 'chat');
   const current = useApp((s) => s.view === 'task' && s.selectedTaskId === id);
   if (!title || !status) return null;
-  const meta = status === 'draft' ? DRAFT_META : RUN_STATUS[status];
+  const meta = chat ? CHAT_META : status === 'draft' ? DRAFT_META : RUN_STATUS[status];
   const Icon = meta.icon;
   // The status is the icon's shape (running / paused / awaiting / done / failed / cancelled all differ),
   // not just its colour; the label is read out after the title.
@@ -101,15 +105,15 @@ function DemoDialog({ onClose }: { onClose: () => void }) {
       footer={(
         <>
           <Button variant="secondary" data-autofocus onClick={onClose}>知道了</Button>
-          <Button variant="primary" icon={Settings} onClick={() => { onClose(); actions.navigate('settings'); }}>前往演示控制</Button>
+          <Button variant="primary" icon={Cpu} onClick={() => { onClose(); actions.navigate('models'); }}>前往模型接入</Button>
         </>
       )}
     >
-      <p>当前没有连接真实后端，任务由浏览器内的模拟器执行。</p>
+      <p>还没有接入模型，闲聊和工作都由内置的模拟器演示。</p>
       <ul className="shell-dialog-list">
         <li>Agent 回复、工具调用、终端输出、Token 统计与连接状态都是模拟数据。</li>
         <li>示例任务标记为「示例数据」。</li>
-        <li>接入真实后端的方法见 README。</li>
+        <li>在「模型接入」里用命令行登录或 API 密钥接入 Claude、GPT、DeepSeek、Kimi、Qwen、GLM、MiniMax、豆包（需要桌面版）。</li>
       </ul>
     </Dialog>,
     document.body,
@@ -130,6 +134,7 @@ export function SideNav() {
   const drawerMode = useMedia(DRAWER_QUERY);
   const compact = collapsed || narrow;
   const [demoOpen, setDemoOpen] = useState(false);
+  const liveCount = useApp((s) => PROVIDERS.filter((p) => readiness(p, s.models.providers[p.id], s.models.providers[p.id].auth).ready).length);
   const closeDemo = useCallback(() => setDemoOpen(false), []);
 
   const nextMode: VisualMode = mode === 'sam' ? 'firefly' : 'sam';
@@ -145,27 +150,39 @@ export function SideNav() {
               <span className="label side-nav__sub">Agent 工作台</span>
             </div>
           </div>
-          <button
-            type="button"
-            className="side-nav__demo"
-            aria-haspopup="dialog"
-            title="演示模式：当前使用的是模拟数据"
-            onClick={() => setDemoOpen(true)}
-          >
-            <FlaskConical size={12} aria-hidden />
-            {/* In the icon rail only 「演示」 is drawn; 「模式」 stays in the accessible name. */}
-            <span className="side-nav__demo-text">演示<span className="side-nav__demo-more">模式</span></span>
-          </button>
+          {liveCount > 0 ? (
+            <button
+              type="button"
+              className="side-nav__demo side-nav__demo--live"
+              title={`已接入 ${liveCount} 个模型（演示任务仍由模拟器执行）`}
+              onClick={() => actions.navigate('models')}
+            >
+              <Cpu size={12} aria-hidden />
+              <span className="side-nav__demo-text">{liveCount}<span className="side-nav__demo-more"> 个模型</span></span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="side-nav__demo"
+              aria-haspopup="dialog"
+              title="演示模式：还没有接入模型，任务使用模拟数据"
+              onClick={() => setDemoOpen(true)}
+            >
+              <FlaskConical size={12} aria-hidden />
+              {/* In the icon rail only 「演示」 is drawn; 「模式」 stays in the accessible name. */}
+              <span className="side-nav__demo-text">演示<span className="side-nav__demo-more">模式</span></span>
+            </button>
+          )}
         </div>
         <Button
           variant="primary"
           icon={Plus}
           className="side-nav__cta"
-          title="新建任务 (Alt+1)"
+          title="新建闲聊或工作 (Alt+1)"
           aria-current={view === 'new' ? 'page' : undefined}
           onClick={() => actions.navigate('new')}
         >
-          新建任务
+          新建
         </Button>
       </div>
 

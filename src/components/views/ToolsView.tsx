@@ -5,6 +5,8 @@ import { Panel, SimTag, cx } from '../ui';
 import { ConnectionCard } from './config/ConnectionCard';
 import { ToolRow } from './config/ToolRow';
 import { PERM_ICON, sameRecord, selectToolStats } from './config/util';
+import { BrowserPanel } from './config/BrowserPanel';
+import { SkillsPanel } from './config/SkillsPanel';
 import { ViewHeader } from './config/ViewHeader';
 
 const POLICY_HELP = [
@@ -27,12 +29,15 @@ export function ToolsView() {
         <Info size={18} aria-hidden className="callout__icon" />
         <div className="callout__body">
           <p className="callout__text">
-            这些是演示连接与模拟工具。接入真实后端需要实现 <code>HarnessBackend</code> 接口，见 README「接入真实后端」。
+            工具策略同时作用于演示和接入的模型：命令行 Agent 要用某个工具时，按这里的设置自动执行、先问你或直接拒绝。下方「连接状态」是演示数据。
           </p>
         </div>
       </div>
 
-      <Panel label="工具策略" title="工具" icon={Wrench} energy flush actions={<SimTag />}>
+      <SkillsPanel />
+      <BrowserPanel />
+
+      <Panel label="工具策略" title="工具" icon={Wrench} energy flush>
         <ul className="tools-policy" aria-label="调用策略说明">
           {POLICY_HELP.map(({ id, text }) => {
             const Icon = PERM_ICON[id];

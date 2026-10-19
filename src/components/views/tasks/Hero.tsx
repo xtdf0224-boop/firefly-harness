@@ -1,28 +1,29 @@
-/* Welcome hero — the one place (besides the completion toast) that carries character atmosphere.
-   The light-wing arcs and armour plates are pure CSS (views-tasks.css); 流萤 shows the soft arcs,
-   萨姆 swaps in sharper plating. */
-import { SimTag } from '../../ui';
+/* Home greeting, the way chat apps open: the light-wing mark, a title, and — with the persona on —
+   流萤 (or 萨姆) saying hello for the time of day, with her little status. */
+import { useNow } from '../../../lib/hooks';
+import { greeting, mood, PERSONA } from '../../../lib/persona';
+import { awayMs } from '../../../lib/presence';
+import { shallow, useApp } from '../../../state/store';
 import { WingMark } from '../../decor/WingMark';
 
 export function Hero() {
+  const st = useApp((s) => ({ mode: s.settings.mode, persona: s.settings.persona, greet: s.settings.lifeGreeting, moodOn: s.settings.lifeMood, name: s.settings.callName }), shallow);
+  const now = useNow(60_000);
+  const p = PERSONA[st.mode];
+  const line = st.persona && st.greet ? greeting(st.mode, st.name.trim() || '开拓者', awayMs, new Date(now)) : '';
+
   return (
-    <section className="new-task-hero" aria-labelledby="new-task-hero-title">
-      <div className="new-task-hero__art" aria-hidden>
-        <span className="new-task-hero__arcs" />
-        <span className="new-task-hero__plates" />
-      </div>
-      <WingMark size={152} glow animated className="new-task-hero__mark" />
-      <div className="new-task-hero__copy">
-        <p className="label new-task-hero__eyebrow">萤火 · Agent 工作台</p>
-        <h1 className="new-task-hero__title" id="new-task-hero-title">让萤火照亮下一步</h1>
-        <p className="new-task-hero__lead">
-          描述一个目标，编排 Agent 会拆解计划、分派给合适的 Agent，并在写文件、执行命令等关键操作前征求你的确认。
+    <section className="home-hero" aria-labelledby="home-title">
+      <WingMark size={84} glow animated className="home-hero__mark" />
+      <h1 className="home-hero__title" id="home-title">让萤火照亮下一步</h1>
+      {line ? (
+        <p className="home-hero__greet">
+          <span className="home-hero__who">{p.name}{st.moodOn && <span className="home-hero__mood">{mood(st.mode, 'idle', new Date(now))}</span>}</span>
+          <span className="home-hero__say">{line}</span>
         </p>
-        <p className="new-task-hero__demo">
-          <SimTag />
-          <span>当前为演示模式：任务由浏览器内的模拟器执行，不会调用真实模型或命令。</span>
-        </p>
-      </div>
+      ) : (
+        <p className="home-hero__lead">可以只是闲聊，也可以交给 Agent 一个目标：它会拆解计划、调用工具，并在关键操作前征求你的确认。</p>
+      )}
     </section>
   );
 }

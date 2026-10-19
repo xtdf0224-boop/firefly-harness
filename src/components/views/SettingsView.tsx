@@ -1,6 +1,7 @@
-import { ExternalLink, FileText, FlaskConical, ImageIcon, Info, Keyboard, Palette, Play, RotateCcw, Settings, Unplug } from 'lucide-react';
+import { ExternalLink, FileText, FlaskConical, Heart, ImageIcon, Info, Keyboard, Palette, Play, RotateCcw, Settings, Unplug } from 'lucide-react';
 import { ISSUES_URL, REPO_URL, TERMS } from '../../lib/terms';
-import { useId, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
+import { PERSONA } from '../../lib/persona';
 import { useMedia, useReducedMotion } from '../../lib/hooks';
 import type { MotionPref, ParticleDensity, SimSpeed } from '../../lib/types';
 import { actions } from '../../state/actions';
@@ -13,7 +14,7 @@ import { DEFAULT_SETTINGS } from '../../state/seed';
 import { ModePicker } from './config/ModePicker';
 import { ViewHeader } from './config/ViewHeader';
 
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.2.0';
 
 const MOTION_OPTIONS: Array<{ value: MotionPref; label: string }> = [
   { value: 'system', label: '跟随系统' },
@@ -49,7 +50,7 @@ function SettingRow({ title, desc, descId, children }: { title: string; desc?: R
 
 const KEYS: Array<{ id: string; label: string; keys: ReactNode }> = [
   { id: 'console', label: '展开/收起控制台', keys: <><Kbd>Ctrl</Kbd><span aria-hidden>+</span><Kbd>`</Kbd></> },
-  { id: 'nav', label: '切换导航', keys: <><Kbd>Alt</Kbd><span aria-hidden>+</span><Kbd>1</Kbd><span aria-hidden>…</span><Kbd>6</Kbd></> },
+  { id: 'nav', label: '切换导航', keys: <><Kbd>Alt</Kbd><span aria-hidden>+</span><Kbd>1</Kbd><span aria-hidden>…</span><Kbd>7</Kbd></> },
   { id: 'send', label: '发送或创建', keys: <><Kbd>Ctrl</Kbd><span aria-hidden>+</span><Kbd>Enter</Kbd></> },
   { id: 'peek', label: '赏图（淡出界面看壁纸）', keys: <><Kbd>Alt</Kbd><span aria-hidden>+</span><Kbd>W</Kbd></> },
   { id: 'esc', label: '关闭对话框、状态抽屉或赏图', keys: <Kbd>Esc</Kbd> },
@@ -65,7 +66,7 @@ export function SettingsView() {
 
   return (
     <div className="view settings-view">
-      <ViewHeader icon={Settings} title="设置" desc="外观、运行行为与演示控制。设置保存在本浏览器中。" />
+      <ViewHeader icon={Settings} title="设置" desc="外观、人设、运行行为与演示控制。设置保存在本机。" />
 
       <div className="settings-body">
         <div className="settings-grid">
@@ -105,6 +106,8 @@ export function SettingsView() {
               <WallpaperSettings />
             </div>
           </Panel>
+
+          <PersonaSettings />
 
           <Panel label="行为" title="运行" icon={Play} energy>
             <div className="settings-list">
@@ -275,5 +278,53 @@ function WallpaperSettings() {
       <p className="settings-wallpaper__credit">想完整看壁纸：点导航栏底部的眼睛图标或按 Alt + W（赏图），Esc 返回。</p>
       <p className="settings-wallpaper__credit">两张壁纸都是同人作品，经 wallhaven 获取，版权归原作者，仅供本机使用。</p>
     </section>
+  );
+}
+
+/* ───────────── 人设与活人感 ───────────── */
+
+function PersonaSettings() {
+  const st = useApp((s) => s.settings);
+  const [name, setName] = useState(st.callName);
+  const p = PERSONA[st.mode];
+  const other = PERSONA[st.mode === 'sam' ? 'firefly' : 'sam'];
+  const commit = () => {
+    const v = name.trim().slice(0, 20) || '开拓者';
+    setName(v);
+    if (v !== st.callName) actions.setSetting('callName', v);
+  };
+  return (
+    <Panel label="人设" title="人设与活人感" icon={Heart} energy>
+      <div className="settings-list">
+        <div className="settings-item">
+          <Switch
+            label={`编排 Agent 以「${p.name}」的身份说话`}
+            description={`流萤模式下是流萤：${PERSONA.firefly.summary} 萨姆模式下是萨姆：${PERSONA.sam.summary} 切换视觉模式，口吻随之切到${other.name}。`}
+            checked={st.persona}
+            onChange={(v) => actions.setSetting('persona', v)}
+          />
+        </div>
+        <SettingRow title="她怎么称呼你" desc="闲聊、汇报和问候里都会这样叫你。">
+          <input className="input settings-callname" value={name} maxLength={20} aria-label="称呼" disabled={!st.persona}
+            onChange={(e) => setName(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
+        </SettingRow>
+        <SettingRow title="打字节奏" desc="演示模式的预设回复按阅读速度一个个字出现；真实模型的回复本来就是边想边说。">
+          <Segmented<'natural' | 'instant'> size="sm" label="打字节奏" value={st.typing} onChange={(v) => actions.setSetting('typing', v)}
+            options={[{ value: 'natural', label: '自然' }, { value: 'instant', label: '立即' }]} />
+        </SettingRow>
+        <div className="settings-item">
+          <Switch label="按时间问候" description="欢迎页和新的闲聊里，她会按清晨、深夜等时段打招呼；很久没来时会说「你回来啦」。" checked={st.lifeGreeting} disabled={!st.persona}
+            onChange={(v) => actions.setSetting('lifeGreeting', v)} />
+        </div>
+        <div className="settings-item">
+          <Switch label="小状态" description="空闲时名字旁显示她在做什么（在看星星、待命中……），随时段变化；接入模型时她也知道自己刚才在干嘛。" checked={st.lifeMood} disabled={!st.persona}
+            onChange={(v) => actions.setSetting('lifeMood', v)} />
+        </div>
+        <div className="settings-item">
+          <Switch label="主动搭话" description="闲聊安静 8 分钟后，她可能会主动说一句，你不回复时最多连续两次。接入模型时每次搭话会调用一次模型。" checked={st.lifeNudge}
+            onChange={(v) => actions.setSetting('lifeNudge', v)} />
+        </div>
+      </div>
+    </Panel>
   );
 }

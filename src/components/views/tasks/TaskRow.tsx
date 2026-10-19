@@ -6,7 +6,7 @@ import { memo, useId } from 'react';
 import { relative } from '../../../lib/format';
 import type { Agent, Tone } from '../../../lib/types';
 import { actions } from '../../../state/actions';
-import { AgentAvatar, Badge, IconButton, Meter, SimTag, StatusChip, cx } from '../../ui';
+import { AgentAvatar, Badge, EngineTag, IconButton, Meter, SimTag, StatusChip, cx } from '../../ui';
 import { metaOf, progressText, runText, type TaskSummary } from './taskInfo';
 
 const METER_TONE: Partial<Record<TaskSummary['status'], Tone>> = {
@@ -26,11 +26,11 @@ function AgentStack({ agents, ids }: { agents: Agent[]; ids: string[] }) {
 
 export const TaskRow = memo(function TaskRow({ task, agents, now }: { task: TaskSummary; agents: Agent[]; now: number }) {
   const uid = useId();
-  const meta = metaOf(task.status);
-  const hasRun = task.status !== 'draft';
+  const meta = metaOf(task.status, task.kind);
+  const hasRun = task.status !== 'draft' && task.kind !== 'chat';
   const progress = progressText(task);
   const names = task.agentIds.map((id) => agents.find((a) => a.id === id)?.name).filter(Boolean).join('、');
-  const sourceText = task.source === 'sample' ? '示例数据' : '模拟';
+  const sourceText = task.engine ? `真实模型：${task.engine}` : task.source === 'sample' ? '示例数据' : '模拟';
   const updated = relative(task.updatedAt, now);
   const description = [
     meta.label,
@@ -79,7 +79,7 @@ export const TaskRow = memo(function TaskRow({ task, agents, now }: { task: Task
           )}
           <span className="task-list-row__line">
             <AgentStack agents={agents} ids={task.agentIds} />
-            <SimTag source={task.source} />
+            {task.engine && task.source === 'live' ? <EngineTag label={task.engine} compact /> : <SimTag source={task.source} />}
           </span>
         </span>
         <span className="sr-only" id={`${uid}-d`}>{description}</span>

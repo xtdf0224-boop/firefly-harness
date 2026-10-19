@@ -1,6 +1,6 @@
 {
   "name": "firefly-harness",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "萤火 · Agent 工作台 — 以《崩坏：星穹铁道》流萤 / 萨姆为灵感的 AI Agent Harness 桌面工作台（非官方同人项目，当前为模拟后端演示）",
   "type": "module",
@@ -47,10 +47,14 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "examples/skills/**/*",
       "package.json",
       "!**/*.map"
     ],
     "asar": true,
+    "asarUnpack": [
+      "electron/ai/browser-mcp.cjs"
+    ],
     "npmRebuild": false,
     "win": {
       "target": [

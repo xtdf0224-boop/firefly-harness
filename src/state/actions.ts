@@ -1,11 +1,12 @@
 /* Everything a component can do. Each run control goes through `backend` and then gives visible
    feedback (toast + screen-reader announcement), whether it succeeded or not. */
 import type {
-  AgentId, ConsoleTab, Dialog, ScenarioId, Settings, Task, ToolId, ToolPermission, Toast, UiCommand, ViewId, WorkspaceTab,
+  AgentId, ConsoleTab, Dialog, ScenarioId, Settings, Task, TaskEngine, TaskKind, ToolId, ToolPermission, Toast, UiCommand, ViewId, WorkspaceTab,
 } from '../lib/types';
 import { backend } from './backend';
 import { announce, dropToasts, findApproval, pushEvent, toast as pushToast } from './engine';
-import { seededState } from './seed';
+import { forgetTask, reply } from './live';
+import { seededState, syncPersonaAgent } from './seed';
 import { store, uid } from './store';
 
 type ToastInput = Omit<Toast, 'id' | 'createdAt' | 'ttl'> & { ttl?: number };
@@ -18,6 +19,9 @@ function feedback(t: ToastInput, spoken?: string) {
 }
 
 const runOf = (runId: string) => store.get().runs[runId];
+/** 「（模拟运行）」 for simulator runs; real runs say nothing extra. */
+const sim = (runId?: string) => (runId && runOf(runId)?.source === 'live' ? '' : '（模拟运行）');
+const orchestratorName = () => store.get().agents.find((a) => a.id === 'orchestrator')?.name ?? '编排 Agent';
 const taskOfRun = (runId: string) => store.get().tasks[runOf(runId)?.taskId ?? ''];
 /** The status panel is a drawer below 1280px; docked above, where "open" has no meaning. */
 const drawerMode = () => typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 1279px)').matches;
@@ -68,14 +72,17 @@ export const actions = {
   },
 
   /* ── tasks ── */
-  createTask(input: { title: string; goal: string; scenarioId: ScenarioId; agentIds: AgentId[]; start: boolean }): string {
+  createTask(input: { title: string; goal: string; kind?: TaskKind; engine?: TaskEngine; scenarioId: ScenarioId; agentIds: AgentId[]; start: boolean; skills?: string[] }): string {
     const id = uid('task');
     const now = Date.now();
+    const kind = input.kind ?? 'work';
     store.update((d) => {
+      const first = input.goal.trim();
       const task: Task = {
-        id, title: input.title.trim() || '未命名任务', goal: input.goal.trim(), createdAt: now, updatedAt: now,
+        id, title: input.title.trim() || (kind === 'chat' ? '闲聊' : '未命名任务'), goal: first, createdAt: now, updatedAt: now,
         scenarioId: input.scenarioId, agentIds: input.agentIds.length ? input.agentIds : ['orchestrator'], runIds: [],
-        messages: [{ id: uid('msg'), role: 'user', text: input.goal.trim(), at: now, simulated: false }], source: 'simulated',
+        messages: first ? [{ id: uid('msg'), role: 'user', text: first, at: now, simulated: false }] : [],
+        source: input.engine ? 'live' : 'simulated', kind, engine: input.engine, skills: input.skills,
       };
       d.tasks[id] = task;
       d.taskOrder.unshift(id);
@@ -83,16 +90,32 @@ export const actions = {
       d.selectedTaskId = id;
       d.selectedRunId = undefined;
       d.workspaceTab = 'conversation';
-      pushEvent(d, { kind: 'user', level: 'info', text: `新建任务：${task.title}` });
+      pushEvent(d, { kind: 'user', level: 'info', text: `${kind === 'chat' ? '新建闲聊' : '新建任务'}：${task.title}` });
     });
+    if (kind === 'chat') {
+      if (input.goal.trim()) void reply(id);
+      return id;
+    }
     if (input.start) {
       const r = backend.startRun(id);
-      if (r.ok) feedback({ tone: 'running', title: '任务已创建并开始运行', body: '演示模式：由本地模拟器执行。' });
+      if (r.ok) feedback({ tone: 'running', title: '任务已创建并开始运行', body: input.engine ? `${input.engine.label} 正在制定计划。` : '演示模式：由本地模拟器执行。' });
       else feedback({ tone: 'warning', title: '任务已创建，但还没开始', body: r.error });
     } else {
       feedback({ tone: 'info', title: '任务已创建', body: '准备好后点「开始」。' });
     }
     return id;
+  },
+  /** Switch the model a chat uses; the next reply starts a fresh conversation with it. */
+  setTaskEngine(taskId: string, engine: TaskEngine | undefined) {
+    store.update((d) => {
+      const t = d.tasks[taskId];
+      if (!t) return;
+      t.source = engine ? 'live' : 'simulated';
+      const sameModel = engine && t.engine && engine.provider === t.engine.provider && engine.auth === t.engine.auth && engine.model === t.engine.model;
+      t.engine = engine;
+      if (!sameModel) t.session = undefined;
+      t.messages.push({ id: uid('msg'), role: 'system', text: `已切换到 ${engine ? engine.label : '演示模式'}。`, at: Date.now(), simulated: !engine });
+    });
   },
   requestDeleteTask(taskId: string) {
     store.update((d) => { d.dialog = { kind: 'delete-task', taskId }; });
@@ -100,6 +123,8 @@ export const actions = {
   deleteTask(taskId: string) {
     const task = store.get().tasks[taskId];
     if (!task) return;
+    // Stop the real agent first: it must not keep editing the folder of a task that no longer exists.
+    forgetTask(taskId);
     store.update((d) => {
       const gone = new Set(task.runIds);
       // Toasts about this task (approval, failure, completion, reconnect) would be left with dead actions.
@@ -128,17 +153,17 @@ export const actions = {
     const r = backend.startRun(taskId);
     if (r.ok) {
       store.update((d) => { d.selectedRunId = undefined; });
-      feedback({ tone: 'running', title: '开始运行', body: '编排 Agent 正在制定计划。（模拟）' });
+      feedback({ tone: 'running', title: '开始运行', body: `${orchestratorName()} 正在制定计划。${sim(r.value)}` });
     } else feedback({ tone: 'danger', title: '无法开始', body: r.error });
   },
   pauseRun(runId: string) {
     const r = backend.pauseRun(runId);
-    if (r.ok) feedback({ tone: 'paused', title: '已暂停', body: '当前步骤停在原处，点「继续」即可恢复。（模拟运行）' });
+    if (r.ok) feedback({ tone: 'paused', title: '已暂停', body: runOf(runId)?.source === 'live' ? '当前调用已中断，点「继续」会重新执行这一步。' : '当前步骤停在原处，点「继续」即可恢复。（模拟运行）' });
     else feedback({ tone: 'warning', title: '无法暂停', body: r.error });
   },
   resumeRun(runId: string) {
     const r = backend.resumeRun(runId);
-    if (r.ok) feedback({ tone: 'running', title: '已继续', body: runOf(runId)?.status === 'awaiting' ? '还有待确认的操作，处理后才会往下执行。（模拟运行）' : '从暂停处继续执行。（模拟运行）' });
+    if (r.ok) feedback({ tone: 'running', title: '已继续', body: runOf(runId)?.status === 'awaiting' ? `还有待确认的操作，处理后才会往下执行。${sim(runId)}` : `从暂停处继续执行。${sim(runId)}` });
     else feedback({ tone: 'danger', title: '无法继续', body: r.error });
   },
   requestCancel(runId: string) {
@@ -147,7 +172,7 @@ export const actions = {
   },
   cancelRun(runId: string) {
     const r = backend.cancelRun(runId);
-    if (r.ok) feedback({ tone: 'neutral', title: '已取消运行', body: '未完成的步骤已停止，已生成的产物仍然保留。（模拟运行）' });
+    if (r.ok) feedback({ tone: 'neutral', title: '已取消运行', body: `未完成的步骤已停止，已生成的产物仍然保留。${sim(runId)}` });
     else feedback({ tone: 'warning', title: '无法取消', body: r.error });
   },
   retryRun(runId: string, mode: 'resume' | 'restart' = 'resume') {
@@ -160,15 +185,18 @@ export const actions = {
       const cancelled = prev?.status === 'cancelled';
       const resumeAt = next?.planReady ? next.plan[next.cursor.step] : undefined;
       const carried = next ? next.plan.filter((st) => st.carried).length : 0;
+      const note = sim(r.value);
       if (mode === 'restart') {
-        feedback({ tone: 'running', title: '已从头重新运行', body: '所有步骤会重新执行。（模拟运行）' });
+        feedback({ tone: 'running', title: '已从头重新运行', body: `所有步骤会重新执行。${note}` });
       } else if (!next?.planReady) {
-        feedback({ tone: 'running', title: cancelled ? '已继续运行' : '已开始重试', body: '上次在计划完成前结束，会重新制定计划。（模拟运行）' });
+        feedback({ tone: 'running', title: cancelled ? '已继续运行' : '已开始重试', body: `上次在计划完成前结束，会重新制定计划。${note}` });
       } else {
+        const firstOpen = next.plan.find((st) => !st.carried && st.status !== 'done');
+        const at = next.source === 'live' ? firstOpen : resumeAt;
         feedback({ tone: 'running', title: cancelled ? '已继续未完成的步骤' : '已开始重试',
-          body: resumeAt
-            ? `从第 ${resumeAt.index + 1} 步「${resumeAt.title}」继续${carried > 0 ? `，前 ${carried} 步沿用上次结果` : ''}。（模拟运行）`
-            : '前面的步骤都已完成，直接汇总。（模拟运行）' });
+          body: at
+            ? `从第 ${at.index + 1} 步「${at.title}」继续${carried > 0 ? `，前 ${carried} 步沿用上次结果` : ''}。${note}`
+            : `前面的步骤都已完成，直接汇总。${note}` });
       }
     } else feedback({ tone: 'danger', title: '无法重试', body: r.error });
   },
@@ -182,14 +210,19 @@ export const actions = {
     const resumeHint = paused
       ? (after.pauseReason === 'disconnected' ? '连接恢复后点「继续」' : '点「继续」')
       : '';
+    const real = owner?.source === 'live';
     if (decision === 'approve') {
-      feedback(paused
-        ? { tone: 'info', title: '已记录批准', body: `运行仍处于暂停，${resumeHint}后才会执行。（模拟运行）`, ttl: 5000 }
-        : { tone: 'success', title: '已批准', body: '模拟器继续往下执行，不会真的写文件或运行命令。', ttl: 3000 });
+      feedback(real
+        ? { tone: 'success', title: '已批准', body: 'Agent 会执行这项操作。', ttl: 3000 }
+        : paused
+          ? { tone: 'info', title: '已记录批准', body: `运行仍处于暂停，${resumeHint}后才会执行。（模拟运行）`, ttl: 5000 }
+          : { tone: 'success', title: '已批准', body: '模拟器继续往下执行，不会真的写文件或运行命令。', ttl: 3000 });
     } else {
-      feedback({ tone: 'neutral', title: '已拒绝',
-        body: paused ? `这项操作不会执行（模拟），对应步骤已跳过；运行仍处于暂停，${resumeHint}后继续后面的步骤。` : '这项操作不会执行（模拟），对应步骤已跳过。',
-        ttl: paused ? 5000 : 3500 });
+      feedback(real
+        ? { tone: 'neutral', title: '已拒绝', body: '这项操作不会执行，Agent 会换一种做法或向你说明。', ttl: 3500 }
+        : { tone: 'neutral', title: '已拒绝',
+          body: paused ? `这项操作不会执行（模拟），对应步骤已跳过；运行仍处于暂停，${resumeHint}后继续后面的步骤。` : '这项操作不会执行（模拟），对应步骤已跳过。',
+          ttl: paused ? 5000 : 3500 });
     }
   },
   sendMessage(taskId: string, text: string) {
@@ -227,9 +260,13 @@ export const actions = {
 
   /* ── settings ── */
   setSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
-    store.update((d) => { d.settings[key] = value; });
+    store.update((d) => {
+      d.settings[key] = value;
+      if (key === 'mode' || key === 'persona') syncPersonaAgent(d);
+    });
   },
   resetDemo() {
+    for (const id of Object.keys(store.get().tasks)) forgetTask(id);
     const s = store.get();
     // Only tasks and runs are reset: the user stays on the page they pressed the button on, and keeps
     // their settings, tool policies, agent settings and layout. The selected task no longer exists.

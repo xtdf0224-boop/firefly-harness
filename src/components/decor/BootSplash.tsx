@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useReducedMotion } from '../../lib/hooks';
 import { openRuns, pendingApprovals } from '../../state/selectors';
 import { shallow, useApp } from '../../state/store';
+import { PROVIDERS, readiness } from '../../lib/providers';
 import { cx, Kbd } from '../ui';
 import { WingMark } from './WingMark';
 
@@ -36,6 +37,7 @@ export function BootSplash({ onDone, onLeave }: { onDone: () => void; onLeave?: 
   const mode = useApp((s) => s.settings.mode);
   const autoEnter = useApp((s) => s.settings.bootEnter === 'auto');
   const stats = useApp((s) => ({ tasks: s.taskOrder.length, open: openRuns(s).length, pending: pendingApprovals(s).length }), shallow);
+  const liveCount = useApp((s) => PROVIDERS.filter((p) => readiness(p, s.models.providers[p.id], s.models.providers[p.id].auth).ready).length);
   const reduced = useReducedMotion();
   const clip = CLIP[mode];
   const base = import.meta.env.BASE_URL;
@@ -167,9 +169,9 @@ export function BootSplash({ onDone, onLeave }: { onDone: () => void; onLeave?: 
       </div>
 
       <p className="boot__meta">
-        <span>版本 0.1.0</span>
+        <span>版本 0.2.0</span>
         <span aria-hidden>·</span>
-        <span>演示模式（模拟数据）</span>
+        <span>{liveCount > 0 ? `已接入 ${liveCount} 个模型` : '演示模式（模拟数据）'}</span>
         <span aria-hidden>·</span>
         <span>{stats.tasks} 个任务{stats.pending ? ` · ${stats.pending} 项待确认` : ''}</span>
       </p>

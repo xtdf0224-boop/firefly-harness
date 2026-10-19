@@ -3,6 +3,7 @@
 // isolation and sandbox on, external links open in the system browser, in-app navigation stays put.
 const { app, BrowserWindow, shell, Menu } = require('electron');
 const path = require('node:path');
+const ai = require('./ai/index.cjs');
 
 // One window per user: a second launch focuses the existing one.
 if (!app.requestSingleInstanceLock()) {
@@ -33,6 +34,8 @@ function createWindow() {
       autoplayPolicy: 'no-user-gesture-required',
       // Keep timers and media running when the window is covered (the boot clip must not stall).
       backgroundThrottling: false,
+      // Model access (keys, CLI runs) — see electron/ai/index.cjs.
+      preload: path.join(__dirname, 'preload.cjs'),
     },
   });
   Menu.setApplicationMenu(null);
@@ -45,13 +48,16 @@ function createWindow() {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  // Never navigate the app window away from the bundled page.
-  win.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith('file://')) {
-      event.preventDefault();
-      if (/^https?:\/\//i.test(url)) shell.openExternal(url);
-    }
-  });
+  // Never navigate the app window away from the bundled page — not even to another local file
+  // (a dropped .html would otherwise run with the desktop bridge).
+  const appUrl = require('node:url').pathToFileURL(path.join(__dirname, '..', 'dist', 'index.html')).href;
+  const guard = (event, url) => {
+    if (url.split('#')[0] === appUrl) return;
+    event.preventDefault();
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+  };
+  win.webContents.on('will-navigate', guard);
+  win.webContents.on('will-frame-navigate', (event) => { if (!event.isMainFrame) return; guard(event, event.url); });
   win.on('closed', () => { win = null; });
 }
 
@@ -61,5 +67,10 @@ app.on('second-instance', () => {
   win.focus();
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  ai.register();
+  createWindow();
+});
 app.on('window-all-closed', () => app.quit());
+// Never leave a CLI agent running after the window is gone.
+app.on('before-quit', () => ai.stopAll());

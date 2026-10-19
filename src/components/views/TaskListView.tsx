@@ -79,7 +79,7 @@ export function TaskListView() {
             </div>
             <p className="task-list-empty__note">
               <SimTag />
-              <span>演示模式：新任务由浏览器内的模拟器执行。</span>
+              <span>没有接入模型时，新任务由内置模拟器演示；接入后在新建时选择模型。</span>
             </p>
           </div>
         ) : (

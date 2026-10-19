@@ -1,8 +1,6 @@
 /* Shared primitives. Every region builds from these so 流萤 / 萨姆 modes and status semantics stay
    consistent. Styles live in styles/components.css. */
-import {
-  Check, Copy, FlaskConical, X, type LucideIcon,
-} from 'lucide-react';
+import { Check, Copy, Cpu, FlaskConical, X, type LucideIcon } from 'lucide-react';
 import {
   useCallback, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type KeyboardEvent, type ReactNode,
 } from 'react';
@@ -157,6 +155,16 @@ export function SimTag({ source = 'simulated', compact, className }: { source?: 
     <span className={cx('sim-tag', source === 'sample' && 'sim-tag--sample', compact && 'sim-tag--compact', className)} title={tip}>
       <FlaskConical size={11} aria-hidden />
       <span>{text}</span>
+    </span>
+  );
+}
+
+/** Marks real-model data: which model runs this task. */
+export function EngineTag({ label, compact, className }: { label: string; compact?: boolean; className?: string }) {
+  return (
+    <span className={cx('engine-tag', compact && 'engine-tag--compact', className)} title={`真实模型：${label}`}>
+      <Cpu size={11} aria-hidden />
+      <span className="truncate">{compact ? label.split(' · ')[0] : label}</span>
     </span>
   );
 }

@@ -93,7 +93,7 @@ function ToolCallItemView({ call, defaultOpen = false, showStep = false, paused 
       <div className="tool-call__head">
         <button type="button" className="tool-call__toggle" aria-expanded={open} aria-controls={regionId} onClick={() => { revealOnOpen.current = !open; setOpen(!open); }}>
           <StatusChip meta={meta} size="sm" title={meta === PAUSED_META ? '运行已暂停，这次调用停在原处' : undefined} />
-          <span className="tool-call__tool">{call.tool}</span>
+          <span className="tool-call__tool">{call.toolName ?? call.tool}</span>
           <span className="tool-call__title">{call.title}</span>
           <span className="tool-call__agent">{ctx.agent}</span>
           <span className="tool-call__time">{timeText}</span>

@@ -4,6 +4,7 @@
    A real harness would implement the same interface over its API, and write server events into
    the store with the same shapes (Run, ToolCall, Approval…) — see README「接入真实后端」. */
 import * as engine from './engine';
+import * as live from './live';
 import { store } from './store';
 
 export type Result<T = void> = { ok: true; value: T } | { ok: false; error: string };
@@ -115,4 +116,52 @@ export const mockBackend: HarnessBackend = {
   },
 };
 
-export const backend: HarnessBackend = mockBackend;
+/* Routes each call by the task's engine: tasks with a connected model go to live.ts, everything else
+   (sample history, 演示模式 tasks) stays with the simulator. */
+const taskOfRun = (runId: string) => store.get().tasks[store.get().runs[runId]?.taskId ?? ''];
+const isLive = (task?: { engine?: unknown }) => !!task?.engine;
+
+export const backend: HarnessBackend = {
+  kind: 'live',
+  startRun(taskId) {
+    const task = store.get().tasks[taskId];
+    return isLive(task) ? live.startLiveRun(taskId) : mockBackend.startRun(taskId);
+  },
+  pauseRun(runId) {
+    return isLive(taskOfRun(runId)) && store.get().runs[runId]?.source === 'live' ? live.pauseLive(runId) : mockBackend.pauseRun(runId);
+  },
+  resumeRun(runId) {
+    return isLive(taskOfRun(runId)) && store.get().runs[runId]?.source === 'live' ? live.resumeLive(runId) : mockBackend.resumeRun(runId);
+  },
+  cancelRun(runId) {
+    if (store.get().runs[runId]?.source === 'live') live.cancelLive(runId);
+    // Marking the run, its steps, calls and approvals as cancelled is the same for both.
+    let done = false;
+    store.update((d) => { const r = d.runs[runId]; if (r) done = engine.cancelRun(d, r, Date.now()); });
+    return done ? ok(undefined) : fail('这个运行已经结束。');
+  },
+  retryRun(runId, mode) {
+    const task = taskOfRun(runId);
+    return isLive(task) ? live.startLiveRun(task.id, { retryOf: runId, mode }) : mockBackend.retryRun(runId, mode);
+  },
+  decideApproval(approvalId, decision) {
+    const found = engine.findApproval(store.get(), approvalId);
+    if (found?.run.source === 'live') return live.decideLive(approvalId, decision) ? ok(undefined) : fail('这项确认已经处理过或已失效。');
+    return mockBackend.decideApproval(approvalId, decision);
+  },
+  sendMessage(taskId, text) {
+    const task = store.get().tasks[taskId];
+    if (!task) return fail('找不到这个任务。');
+    if (task.kind === 'chat') {
+      store.update((d) => {
+        d.tasks[taskId].messages.push({ id: `msg_${Date.now().toString(36)}u`, role: 'user', text, at: Date.now(), simulated: false });
+        engine.touch(d, taskId, Date.now());
+      });
+      void live.reply(taskId);
+      return ok(undefined);
+    }
+    return isLive(task) ? live.messageLive(taskId, text) : mockBackend.sendMessage(taskId, text);
+  },
+  reconnect: (id) => mockBackend.reconnect(id),
+  simulateDisconnect: (id) => mockBackend.simulateDisconnect!(id),
+};

@@ -1,6 +1,7 @@
 /* Header panel of the workspace: back link, run selector, drawer button, task title + run status,
    run controls and the compact run meta (time · steps · tokens). */
-import { ArrowLeft, Clock3, PanelRight } from 'lucide-react';
+import { ArrowLeft, Clock3, FolderOpen, PanelRight } from 'lucide-react';
+import { desktop } from '../../lib/desktop';
 import { useId } from 'react';
 import { clock, tokens } from '../../lib/format';
 import { useMedia } from '../../lib/hooks';
@@ -8,7 +9,7 @@ import { RUN_STATUS } from '../../lib/status';
 import { actions } from '../../state/actions';
 import { pendingApprovals } from '../../state/selectors';
 import { shallow, useApp } from '../../state/store';
-import { Badge, Button, IconButton, SimTag, StatusChip } from '../ui';
+import { Badge, Button, EngineTag, IconButton, SimTag, StatusChip } from '../ui';
 import { RunControls } from './RunControls';
 import { NO_RUN_META, stepCounts } from './shared';
 
@@ -25,7 +26,7 @@ export interface RunHeaderProps {
 export function RunHeader({ taskId, runId, latestId }: RunHeaderProps) {
   const task = useApp((s) => {
     const t = s.tasks[taskId];
-    return t ? { title: t.title, source: t.source, runs: t.runIds.length } : undefined;
+    return t ? { title: t.title, source: t.source, runs: t.runIds.length, engine: t.engine?.label, cwd: t.engine?.cwd } : undefined;
   }, shallow);
   // Primitives only: seconds instead of ms keeps the header at ~1 render per second while running.
   const run = useApp((s) => {
@@ -55,9 +56,12 @@ export function RunHeader({ taskId, runId, latestId }: RunHeaderProps) {
           <IconButton icon={ArrowLeft} label="返回任务列表" onClick={() => actions.navigate('tasks')} />
           <span className="label">任务</span>
           {/* The viewed run's provenance wins: a retry of a sample task is a simulated run. */}
-          <SimTag source={run?.source ?? task.source} />
+          {task.engine && (run?.source ?? task.source) === 'live' ? <EngineTag label={task.engine} /> : <SimTag source={run?.source ?? task.source} />}
         </div>
         <div className="panel__actions ws-header__tools">
+          {task.cwd && desktop && (
+            <IconButton icon={FolderOpen} variant="ghost" label={`打开工作文件夹：${task.cwd}`} onClick={() => void desktop?.openFolder(task.cwd!)} />
+          )}
           {task.runs > 1 && runId && <RunSelect taskId={taskId} value={runId} />}
           {narrow && (
             <span className="ws-drawer-btn">

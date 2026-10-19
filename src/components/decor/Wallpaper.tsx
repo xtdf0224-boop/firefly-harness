@@ -18,7 +18,7 @@ import { WALLPAPERS, wallpaperFor, type WallpaperDef } from './wallpapers';
 
 /** 自动调节: the welcome page shows the art fully; dense pages dim it slightly. */
 const VIEW_SHIFT: Record<ViewId, number> = {
-  new: -0.08, tasks: 0, task: 0.06, agents: 0.03, tools: 0.04, history: 0.05, settings: 0,
+  new: -0.08, tasks: 0, task: 0.06, agents: 0.03, tools: 0.04, models: 0.04, history: 0.05, settings: 0,
 };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));

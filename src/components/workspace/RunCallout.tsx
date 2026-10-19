@@ -2,7 +2,7 @@
    the run as a full ApprovalCard (preview capped and laid out beside the facts, see workspace.css,
    so the plan and tabs stay in view while the run waits). Failed runs use role="alert";
    everything else role="status". */
-import { FlaskConical, Loader, Package, Play, CirclePlay, RotateCcw, Terminal, type LucideIcon } from 'lucide-react';
+import { CirclePlay, Cpu, FlaskConical, Loader, Package, Play, RotateCcw, Terminal, type LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { clock } from '../../lib/format';
 import { RUN_STATUS } from '../../lib/status';
@@ -48,7 +48,7 @@ export interface RunCalloutProps {
   latestId?: string;
 }
 
-export function RunCallout({ runId, latestId }: RunCalloutProps) {
+export function RunCallout({ taskId, runId, latestId }: RunCalloutProps) {
   const run = useApp((s) => {
     const r = runId ? s.runs[runId] : undefined;
     if (!r) return undefined;
@@ -61,16 +61,22 @@ export function RunCallout({ runId, latestId }: RunCalloutProps) {
   }, shallow);
   const pending = useApp((s) => (runId ? s.runs[runId]?.approvals.filter((a) => a.status === 'pending') : undefined) ?? NO_APPROVALS, shallow);
   const up = useApp(gatewayUp);
+  const engine = useApp((s) => s.tasks[taskId]?.engine?.label);
+  const lead = useApp((s) => s.agents.find((a) => a.id === 'orchestrator')?.name ?? '编排 Agent');
   const interactive = !!runId && runId === latestId;
 
   if (!runId || !run) {
     return (
       <Callout tone="neutral" icon={CirclePlay} title="准备就绪">
-        <p className="callout__text">点击开始后，编排 Agent 会先制定计划；写文件、执行命令等操作会先征求你的确认。</p>
+        <p className="callout__text">点击开始后，{lead}会先制定计划；写文件、执行命令等操作会先征求你的确认。</p>
         <p className="ws-callout__tag">
-          <span className="sim-tag" title="演示模式：由浏览器内的模拟器生成，没有调用真实模型、工具或命令。">
-            <FlaskConical size={11} aria-hidden />将由模拟器执行
-          </span>
+          {engine ? (
+            <span className="engine-tag" title={`真实模型：${engine}`}><Cpu size={11} aria-hidden />将由 {engine} 执行</span>
+          ) : (
+            <span className="sim-tag" title="演示模式：由浏览器内的模拟器生成，没有调用真实模型、工具或命令。">
+              <FlaskConical size={11} aria-hidden />将由模拟器执行
+            </span>
+          )}
         </p>
       </Callout>
     );
@@ -86,12 +92,12 @@ export function RunCallout({ runId, latestId }: RunCalloutProps) {
   let callout: ReactNode = null;
   switch (status) {
     case 'queued':
-      callout = <Callout tone="neutral" icon={RUN_STATUS.queued.icon} title="排队中"><p className="callout__text">等待模拟器开始执行。</p></Callout>;
+      callout = <Callout tone="neutral" icon={RUN_STATUS.queued.icon} title="排队中"><p className="callout__text">{engine ? '等待开始执行。' : '等待模拟器开始执行。'}</p></Callout>;
       break;
 
     case 'running':
       if (!run.planReady) {
-        callout = <Callout tone="running" icon={Loader} spin live title="编排 Agent 正在制定计划…" />;
+        callout = <Callout tone="running" icon={Loader} spin live title={`${lead}正在制定计划…`} />;
       }
       break;
 

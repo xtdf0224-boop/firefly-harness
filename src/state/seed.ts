@@ -3,7 +3,9 @@
    simulated runs — and are labeled 示例数据 (source: 'sample'). */
 import { produce } from 'immer';
 import type { Agent, AppState, Connection, Settings, Task, ToolDef } from '../lib/types';
+import { PERSONA } from '../lib/persona';
 import { GATEWAY_ID, simulateOffline } from './engine';
+import { initialModels } from './models';
 import { TEMPLATES } from './scenarios';
 import { uid } from './store';
 
@@ -21,6 +23,12 @@ export const DEFAULT_SETTINGS: Settings = {
   wallpaperAdaptive: true,
   bootAnimation: true,
   bootEnter: 'click',
+  persona: true,
+  callName: '开拓者',
+  typing: 'natural',
+  lifeGreeting: true,
+  lifeMood: true,
+  lifeNudge: true,
 };
 
 export const AGENTS: Agent[] = [
@@ -44,9 +52,21 @@ export const TOOLS: ToolDef[] = [
   { id: 'code_search', name: '代码搜索', category: '检索',     risk: 'low',    permission: 'auto',    description: '在项目中按关键字或正则搜索。' },
   { id: 'shell',       name: '执行命令', category: '执行',     risk: 'high',   permission: 'confirm', description: '在沙箱终端中执行命令。' },
   { id: 'web_search',  name: '网页搜索', category: '网络',     risk: 'low',    permission: 'auto',    description: '通过搜索服务检索网页。' },
-  { id: 'web_fetch',   name: '抓取网页', category: '网络',     risk: 'medium', permission: 'auto',    description: '下载网页并提取正文。' },
+  { id: 'web_fetch',   name: '抓取网页', category: '网络',     risk: 'medium', permission: 'confirm', description: '下载网页并提取正文。' },
   { id: 'git',         name: 'Git 操作', category: '版本控制', risk: 'medium', permission: 'confirm', description: '查看状态、提交与切换分支。' },
+  { id: 'browser_read', name: '浏览网页', category: '网络',     risk: 'low',    permission: 'auto',    description: '读取萤火浏览器当前页面、截图、滚动（只在开启「浏览器」的命令行任务里出现）。' },
+  { id: 'browser_act',  name: '操作网页', category: '网络',     risk: 'medium', permission: 'confirm', description: '在萤火浏览器里打开网址、后退、点击、输入、按键——打开的可能是你已登录的网站，点击和输入可能提交表单或改动网站上的数据。' },
+  { id: 'other',       name: '其他工具', category: '执行',     risk: 'medium', permission: 'confirm', description: '命令行 Agent 自带的其他工具（子任务、MCP 工具等），只在接入真实模型时出现。' },
 ];
+
+/** 编排 Agent takes 流萤's (or 萨姆's) name when the persona is on. */
+export function syncPersonaAgent(d: { agents: Agent[]; settings: Settings }) {
+  const o = d.agents.find((a) => a.id === 'orchestrator');
+  if (!o) return;
+  const p = d.settings.persona ? PERSONA[d.settings.mode] : undefined;
+  o.name = p ? p.name : AGENTS[0].name;
+  o.glyph = p ? p.glyph : AGENTS[0].glyph;
+}
 
 export function initialConnections(now: number): Connection[] {
   return [
@@ -58,6 +78,8 @@ export function initialConnections(now: number): Connection[] {
 }
 
 export function emptyState(now: number, settings: Settings = DEFAULT_SETTINGS): AppState {
+  const agents = AGENTS.map((a) => ({ ...a }));
+  syncPersonaAgent({ agents, settings });
   return {
     view: 'new',
     workspaceTab: 'conversation',
@@ -68,9 +90,10 @@ export function emptyState(now: number, settings: Settings = DEFAULT_SETTINGS): 
     tasks: {},
     taskOrder: [],
     runs: {},
-    agents: AGENTS,
+    agents,
     tools: TOOLS,
     connections: initialConnections(now),
+    models: initialModels(),
     events: [],
     toasts: [],
     announcement: { text: '', at: 0 },

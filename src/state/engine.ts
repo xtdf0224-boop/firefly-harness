@@ -7,6 +7,7 @@ import type {
   AgentId, AppState, Approval, DataSource, Message, PlanStep, Run, RunEvent, Task, Toast, ToolCall, ToolDef,
 } from '../lib/types';
 import { duration, json } from '../lib/format';
+import { completionLine, eventLine } from '../lib/persona';
 import { beatsFor, getScenario, type Beat, type Scenario } from './scenarios';
 import { uid } from './store';
 
@@ -17,7 +18,8 @@ type DStep = Draft<PlanStep>;
 
 export const TICK_MS = 200;
 export const GATEWAY_ID = 'model-gateway';
-export const CONTEXT_LIMIT = 200_000;
+/** Context window shown in the status panel: 1M, the usual size for this generation of models. */
+export const CONTEXT_LIMIT = 1_000_000;
 const EVENT_CAP = 600;
 const TERMINAL_CAP = 800;
 const RECONNECT_DELAY_MS = 10_000;
@@ -173,7 +175,9 @@ function finishPlanning(d: D, run: DRun, task: DTask, sc: Scenario, now: number)
   run.cursor.phase = 'executing';
   run.cursor.beatElapsed = 0;
   addTokens(run, [2800, 520]);
-  say(task, { role: 'agent', agentId: 'orchestrator', runId: run.id, kind: 'plan', text: sc.planIntro, at: now });
+  const v = d.settings.persona ? d.settings.mode : undefined;
+  say(task, { role: 'agent', agentId: 'orchestrator', runId: run.id, kind: 'plan', at: now, persona: v,
+    text: v ? `${eventLine(v, 'plan', d.settings.callName || '开拓者')}${sc.planIntro}` : sc.planIntro });
   pushEvent(d, { at: now, runId: run.id, kind: 'step', level: 'info', text: `计划已生成：共 ${run.plan.length} 步` });
 }
 
@@ -206,7 +210,10 @@ function completeRun(d: D, run: DRun, task: DTask, sc: Scenario, now: number) {
   run.endedAt = now;
   run.cursor.phase = 'done';
   run.live = undefined;
-  say(task, { role: 'agent', agentId: 'orchestrator', runId: run.id, kind: 'summary', text: skipped.length ? skippedSummary(run, sc, skipped) : sc.summary, at: now });
+  const v = d.settings.persona ? d.settings.mode : undefined;
+  const closing = skipped.length ? skippedSummary(run, sc, skipped) : sc.summary;
+  say(task, { role: 'agent', agentId: 'orchestrator', runId: run.id, kind: 'summary', at: now, persona: v,
+    text: v && !skipped.length ? `${eventLine(v, 'done', d.settings.callName || '开拓者')}${closing}` : closing });
   pushEvent(d, { at: now, runId: run.id, kind: 'run', level: skipped.length ? 'warn' : 'success',
     text: `运行 #${run.attempt} ${skipped.length ? `已结束（${skipped.length} 步被跳过）` : '完成'}：${task.title}` });
   touch(d, task.id, now);
@@ -214,7 +221,7 @@ function completeRun(d: D, run: DRun, task: DTask, sc: Scenario, now: number) {
   toast(d, { tone: 'success', title: '任务完成',
     body: skipped.length
       ? `「${task.title}」· 运行已结束，其中 ${skipped.length} 步被跳过，没有执行。（模拟运行）`
-      : `「${task.title}」· 萤火汇聚，照亮了这一程的终点。（模拟运行）`,
+      : `${completionLine(d.settings.mode, task.title)}（模拟运行）`,
     action: { label: '查看产物', command: { type: 'open-task', taskId: task.id, runId: run.id, tab: 'artifacts' } } });
   announce(d, skipped.length
     ? `任务「${task.title}」已结束，${skipped.length} 步被跳过（模拟运行）`
@@ -540,7 +547,8 @@ export function disconnect(d: D, connectionId: string, now: number) {
   let paused = 0;
   if (conn.kind === 'model') {
     for (const run of Object.values(d.runs)) {
-      if (pauseRun(d, run, 'disconnected', now)) {
+      // The gateway is part of the simulation; real model runs have their own connections.
+      if (run.source !== 'live' && pauseRun(d, run, 'disconnected', now)) {
         paused++;
         term(run, 'sys', `# 与${conn.name}的连接断开（模拟），运行已暂停`, now);
       }
@@ -590,7 +598,8 @@ export function tick(d: D, now: number, realDt: number) {
   for (const run of Object.values(d.runs)) {
     if (run.status !== 'running') continue;
     addActive(run, realDt);
-    advance(d, run, realDt * speed, now);
+    // Real runs (live.ts) only borrow the clock; the simulator never moves them.
+    if (run.source !== 'live') advance(d, run, realDt * speed, now);
   }
 }
 

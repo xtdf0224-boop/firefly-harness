@@ -12,7 +12,7 @@ import { AgentAvatar, cx } from '../ui';
 export function GoalCard({ taskId }: { taskId: string }) {
   const task = useApp((s) => {
     const t = s.tasks[taskId];
-    return t ? { goal: t.goal, createdAt: t.createdAt, scenarioId: t.scenarioId, agentIds: t.agentIds } : undefined;
+    return t ? { goal: t.goal, createdAt: t.createdAt, scenarioId: t.scenarioId, agentIds: t.agentIds, engine: t.engine?.label, cwd: t.engine?.cwd, access: t.engine?.access } : undefined;
   }, shallow);
   const agents = useApp((s) => s.agents);
   const now = useNow(30_000);
@@ -50,7 +50,9 @@ export function GoalCard({ taskId }: { taskId: string }) {
             </span>
             <span>{members.length} 个 Agent<span className="sr-only">：{names}</span></span>
           </li>
-          <li>{task.scenarioId === 'general' ? scenario : `模板：${scenario}`}</li>
+          {task.engine
+            ? <li className="ws-goal__engine" title={task.cwd ? `工作文件夹：${task.cwd}` : undefined}>{task.engine}{task.access === 'read' ? ' · 只读' : ''}</li>
+            : <li>{task.scenarioId === 'general' ? '演示模式' : `示例：${scenario}`}</li>}
         </ul>
       </div>
       <p id={textId} ref={textRef} className={cx('ws-goal__text', !expanded && 'is-clamped')}>{goal}</p>

@@ -2,7 +2,7 @@
    backend or the bundled simulator produced it. `simulated` / `source` fields carry the provenance
    so the UI can label demo data honestly. */
 
-export type ViewId = 'new' | 'tasks' | 'task' | 'agents' | 'tools' | 'history' | 'settings';
+export type ViewId = 'new' | 'tasks' | 'task' | 'agents' | 'tools' | 'models' | 'history' | 'settings';
 export type WorkspaceTab = 'conversation' | 'steps' | 'artifacts';
 export type ConsoleTab = 'tools' | 'terminal' | 'errors' | 'timeline';
 
@@ -26,7 +26,106 @@ export type Risk = 'low' | 'medium' | 'high';
 export type Tone = 'neutral' | 'info' | 'running' | 'success' | 'warning' | 'danger' | 'paused';
 
 export type AgentId = 'orchestrator' | 'researcher' | 'coder' | 'reviewer';
-export type ToolId = 'read_file' | 'write_file' | 'shell' | 'code_search' | 'web_search' | 'web_fetch' | 'git';
+export type ToolId = 'read_file' | 'write_file' | 'shell' | 'code_search' | 'web_search' | 'web_fetch' | 'git' | 'browser_read' | 'browser_act' | 'other';
+
+/* ───────────── 模型接入 ───────────── */
+
+export type ProviderId = 'claude' | 'gpt' | 'deepseek' | 'kimi' | 'qwen' | 'glm' | 'minimax' | 'doubao';
+/** CLI programs the desktop app can drive. `claude-compat` = Claude Code pointed at another vendor's
+ *  Anthropic-compatible endpoint with that vendor's key. */
+export type DriverId = 'claude-code' | 'codex' | 'kimi' | 'qwen' | 'mcode' | 'dsh' | 'claude-compat';
+export type AuthMode = 'cli' | 'api';
+/** What a work task's CLI agent may do: follow 工具与连接's policies, or only read. */
+export type WorkAccess = 'policy' | 'read';
+
+export interface CliStatus {
+  found: boolean;
+  path?: string;
+  version?: string;
+  login: 'yes' | 'no' | 'unknown' | 'n/a';
+  account?: string;
+  detail?: string;
+  at: number;
+}
+
+export interface ConnectionTest {
+  ok: boolean;
+  at: number;
+  ms: number;
+  message: string;
+  auth: AuthMode;
+  driver?: DriverId;
+}
+
+/** Non-secret settings for one vendor. The key itself lives encrypted in the desktop process. */
+export interface ProviderConfig {
+  id: ProviderId;
+  /** Which way new tasks use this vendor. */
+  auth: AuthMode;
+  driver: DriverId;
+  region: string;
+  /** Overrides the region's base URL when not empty. */
+  baseUrl: string;
+  model: string;
+  /** Model passed to the CLI; '' = the CLI's own default. */
+  cliModel: string;
+  /** Custom path to the CLI; '' = find it on PATH. */
+  cliPath: string;
+  /** Codex only: its Windows sandbox fails on some machines; 'danger-full-access' runs without it. */
+  codexSandbox?: 'workspace-write' | 'danger-full-access';
+  /** '••••abcd' when a key is saved. */
+  keyHint?: string;
+  cli?: CliStatus;
+  test?: ConnectionTest;
+}
+
+export interface ModelState {
+  providers: Record<ProviderId, ProviderConfig>;
+  /** Models a CLI reports live (Codex: the account's models and their effort levels). Not saved. */
+  live?: Partial<Record<DriverId, import('./effort').LiveModel[]>>;
+  /** Running inside the desktop app (model access needs it). */
+  desktop: boolean;
+  encryption: boolean;
+  workspaceRoot?: string;
+  /** 'demo' or a vendor: preselected for new tasks. */
+  defaultEngine: 'demo' | ProviderId;
+}
+
+/** How a task runs. Undefined = the bundled simulator (演示模式). */
+export interface TaskEngine {
+  kind: 'live';
+  provider: ProviderId;
+  auth: AuthMode;
+  driver?: DriverId;
+  model: string;
+  /** e.g. 「Claude · Claude Code」 — shown in headers and messages. */
+  label: string;
+  /** Working folder for CLI agents. */
+  cwd?: string;
+  access?: WorkAccess;
+  /** 推理强度; undefined = the model's / tool's own default. */
+  effort?: import('./effort').Effort;
+  /** 浏览器控制: the CLI agent may drive the 萤火浏览器 window. */
+  browser?: boolean;
+}
+
+export type TaskKind = 'chat' | 'work';
+
+/** A skill folder in <userData>/skills (SKILL.md frontmatter + body). */
+export interface SkillInfo {
+  folder: string;
+  name: string;
+  description: string;
+  modes: TaskKind[];
+  dir: string;
+  skillFile: string;
+  enabled: boolean;
+  body: string;
+  version?: string;
+  author?: string;
+  /** Why it cannot be used yet (no SKILL.md, no description…). */
+  error?: string;
+}
 
 export interface Agent {
   id: AgentId;
@@ -78,6 +177,14 @@ export interface Task {
   runIds: string[];
   messages: Message[];
   source: DataSource;
+  /** 闲聊 or 工作. Older saves have no kind: they are work tasks. */
+  kind?: TaskKind;
+  /** Real model; undefined = 演示模式. */
+  engine?: TaskEngine;
+  /** CLI session id, so later runs and chat turns continue the same conversation. */
+  session?: string;
+  /** Skill folders picked for this task; undefined = every enabled skill for its kind. */
+  skills?: string[];
 }
 
 export type ScenarioId = 'refactor' | 'research' | 'report' | 'general';
@@ -99,6 +206,8 @@ export interface PlanStep {
   note?: string;
   /** True when a retry reused this step's result from the previous attempt. */
   carried?: boolean;
+  /** What the agent reported for this step (real runs). */
+  result?: string;
 }
 
 export interface ToolCallError {
@@ -126,6 +235,8 @@ export interface ToolCall {
   expectedMs?: number;
   approvalId?: string;
   simulated: boolean;
+  /** The CLI's own tool name (PowerShell, Edit, apply_patch…) when `tool` is a mapped category. */
+  toolName?: string;
 }
 
 export interface Approval {
@@ -155,6 +266,16 @@ export interface Message {
   at: number;
   kind?: 'plan' | 'note' | 'summary' | 'error' | 'reply';
   simulated: boolean;
+  /** Still being written (a real model streaming its reply). */
+  streaming?: boolean;
+  /** Which voice spoke (流萤 or 萨姆), so switching modes later does not rename old messages. */
+  persona?: VisualMode;
+  /** The reply came from a real model (rendered as Markdown, no 模拟 tag). */
+  live?: boolean;
+  /** The model's visible reasoning for this reply (shown folded, like DeepSeek's 思考过程). */
+  thinking?: string;
+  /** A supplement sent during a live run that has already been handed to the agent. */
+  delivered?: boolean;
 }
 
 export interface Artifact {
@@ -246,6 +367,8 @@ export interface Run {
   fixStepIndex?: number;
   failure?: { stepId: string; message: string };
   source: DataSource;
+  /** Real runs: which model ran it, e.g. 「Claude · Claude Code · claude-sonnet-5-5」. */
+  engineLabel?: string;
 }
 
 export interface RunErrorRecord {
@@ -282,6 +405,18 @@ export interface Settings {
   bootAnimation: boolean;
   /** Title screen of the 开机动画: wait for a click (like the game) or enter by itself. */
   bootEnter: 'click' | 'auto';
+  /** 编排 Agent speaks as 流萤 (or 萨姆 in 萨姆 mode). */
+  persona: boolean;
+  /** How she addresses you. */
+  callName: string;
+  /** 'natural' reveals replies at a reading pace; 'instant' shows them at once. */
+  typing: 'natural' | 'instant';
+  /** Time-of-day greeting on the welcome page. */
+  lifeGreeting: boolean;
+  /** Little idle status next to her name (在看星星、待命中…). */
+  lifeMood: boolean;
+  /** In a quiet chat she may say something on her own (max twice in a row). */
+  lifeNudge: boolean;
 }
 
 /** Serializable UI commands, so engine-made toasts can carry an action without importing the UI. */
@@ -341,6 +476,9 @@ export interface AppState {
   agents: Agent[];
   tools: ToolDef[];
   connections: Connection[];
+  models: ModelState;
+  /** Installed skills (read from the desktop side; not saved in the page). */
+  skills?: { root: string; list: SkillInfo[]; loaded: boolean };
   events: RunEvent[];        // global timeline, newest last, capped
   toasts: Toast[];
   dialog?: Dialog;

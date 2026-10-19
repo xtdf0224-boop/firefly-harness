@@ -1,7 +1,7 @@
 /* Shared task facts for the welcome page and the task list: one flat, comparable summary per task,
    so lists re-render only when something a row shows actually changes (the engine commits run time
    five times a second). */
-import { CircleDashed } from 'lucide-react';
+import { CircleDashed, MessageCircle } from 'lucide-react';
 import { RUN_STATUS, isOpenRun, type StatusMeta } from '../../../lib/status';
 import type { AgentId, AppState, DataSource } from '../../../lib/types';
 import { latestRun, stepProgress, type TaskStatus } from '../../../state/selectors';
@@ -10,7 +10,9 @@ import { shallow } from '../../../state/store';
 /** A task that has never been run. Same shape as the run statuses so it renders as a StatusChip. */
 export const DRAFT_META: StatusMeta = { label: '未开始', tone: 'neutral', icon: CircleDashed };
 
-export const metaOf = (status: TaskStatus): StatusMeta => (status === 'draft' ? DRAFT_META : RUN_STATUS[status]);
+export const CHAT_META: StatusMeta = { label: '闲聊', tone: 'info', icon: MessageCircle };
+
+export const metaOf = (status: TaskStatus, kind?: 'chat' | 'work'): StatusMeta => (kind === 'chat' ? CHAT_META : status === 'draft' ? DRAFT_META : RUN_STATUS[status]);
 
 export interface TaskSummary {
   id: string;
@@ -30,6 +32,9 @@ export interface TaskSummary {
   pending: number;
   /** Failure message of the latest run when it failed ('' when the run gave none). */
   failure?: string;
+  kind: 'chat' | 'work';
+  /** Real model label, when the task runs on one. */
+  engine?: string;
 }
 
 /** One summary per task, newest created first (the store's taskOrder). */
@@ -56,6 +61,8 @@ export function selectSummaries(s: AppState): TaskSummary[] {
       stepsTotal: total,
       pending: run && isOpenRun(run.status) ? run.approvals.filter((a) => a.status === 'pending').length : 0,
       failure: run?.status === 'failed' ? (run.failure?.message ?? '') : undefined,
+      kind: task.kind ?? 'work',
+      engine: task.engine?.label,
     });
   }
   return out;
@@ -66,7 +73,7 @@ export const summariesEqual = (a: TaskSummary[], b: TaskSummary[]) =>
   a.length === b.length && a.every((item, i) => shallow(item, b[i]));
 
 /** "第 2 次运行" / "尚未运行". */
-export const runText = (t: Pick<TaskSummary, 'status' | 'attempt'>) => (t.status === 'draft' ? '尚未运行' : `第 ${t.attempt} 次运行`);
+export const runText = (t: Pick<TaskSummary, 'status' | 'attempt'> & { kind?: 'chat' | 'work' }) => (t.kind === 'chat' ? '闲聊' : t.status === 'draft' ? '尚未运行' : `第 ${t.attempt} 次运行`);
 
 /** "3/5 步", "计划生成中", or "" when the task never ran. */
 export function progressText(t: Pick<TaskSummary, 'status' | 'stepsDone' | 'stepsTotal'>) {

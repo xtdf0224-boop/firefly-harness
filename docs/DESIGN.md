@@ -91,10 +91,12 @@ src/
 │  └─ hooks.ts              useNow / useReducedMotion / useMedia / usePageVisible
 ├─ state/
 │  ├─ store.ts              immer 外部 store + useApp(selector, equal)
-│  ├─ backend.ts            HarnessBackend 接口 + mockBackend（真实后端从这里接入）
+│  ├─ backend.ts            HarnessBackend 接口：接入模型的任务交给 live.ts，其余交给模拟器
+│  ├─ live.ts               真实运行器：计划 → 分步 → 总结、待确认操作、闲聊回复
+│  ├─ models.ts             模型接入的状态与操作（密钥提示、CLI 检测、登录、测试）
 │  ├─ actions.ts            组件可调用的全部操作（每个操作都有 toast + 读屏播报反馈）
 │  ├─ engine.ts             ⚠ 模拟引擎：计划、工具调用、确认、失败、重试、断线
-│  ├─ scenarios.ts          ⚠ 模拟脚本：三个示例模板 + 通用流程
+│  ├─ scenarios.ts          ⚠ 模拟脚本：示例历史用的三个场景 + 新建任务用的通用流程
 │  ├─ seed.ts               Agent、工具策略、演示连接、示例历史（离线跑模拟器生成）
 │  ├─ selectors.ts          派生数据
 │  ├─ persist.ts            localStorage 保存；重新载入时运行中的任务自动暂停
@@ -144,3 +146,11 @@ src/
 8. **读取状态**：`useApp(selector)`；selector 若返回新数组/对象，传 `shallow`。修改一律走 `actions.*`。
 9. **反馈**：按钮操作的反馈（toast、播报）已由 `actions` 负责，组件不要重复 toast。
 10. **文案**：功能名称直白；氛围文案只在欢迎页和完成提示。
+
+
+## v0.2：真实模型、闲聊 / 工作、人设
+
+- **两种新建**：闲聊（只对话，不动文件）与工作（计划 → 执行 → 总结，关键操作前确认），取代了按模板新建。
+- **界面参考对话类 harness**（Claude / ChatGPT / DeepSeek / Kimi / Cyrene）：首页居中的输入框，下沿是模式、模型、文件夹、权限的小标签；闲聊是居中单列、回复不套气泡、思考过程折叠；工作对话里按时间穿插工具调用。流萤的味道体现在输入框的萤火呼吸光、发送时飘起的萤火、以人设口吻写的「流萤想了想」；萨姆模式换成切角装甲框与扫描线。
+- **模型接入在桌面进程里完成**（`electron/ai/`），页面只描述「用哪家、什么方式、在哪个文件夹」，密钥从不进入页面。命令行 Agent 的权限请求回到工作台的「待确认操作」，工具策略（自动 / 确认 / 禁用）映射成 Claude Code 的 allow / deny 列表或 Codex 的沙箱。
+- **诚实标注不变**：真实运行标出所用模型（EngineTag），演示数据仍标「模拟 / 示例数据」，两者共用同一套数据结构，`source` 区分来源。

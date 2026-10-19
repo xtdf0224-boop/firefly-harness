@@ -11,6 +11,7 @@ import { SideNav } from './components/shell/SideNav';
 import { StatusPanel } from './components/shell/StatusPanel';
 import { AgentsView } from './components/views/AgentsView';
 import { HistoryView } from './components/views/HistoryView';
+import { ModelsView } from './components/views/ModelsView';
 import { NewTaskView } from './components/views/NewTaskView';
 import { SettingsView } from './components/views/SettingsView';
 import { TaskListView } from './components/views/TaskListView';
@@ -22,10 +23,10 @@ import type { ViewId } from './lib/types';
 import { actions } from './state/actions';
 import { store, useApp } from './state/store';
 
-const NAV_KEYS: Record<string, ViewId> = { '1': 'new', '2': 'tasks', '3': 'agents', '4': 'tools', '5': 'history', '6': 'settings' };
+const NAV_KEYS: Record<string, ViewId> = { '1': 'new', '2': 'tasks', '3': 'agents', '4': 'tools', '5': 'models', '6': 'history', '7': 'settings' };
 /** Page name for document.title; a task page uses the task's own title. */
 const VIEW_TITLES: Record<Exclude<ViewId, 'task'>, string> = {
-  new: '新建任务', tasks: '任务列表', agents: 'Agent', tools: '工具与连接', history: '运行历史', settings: '设置',
+  new: '新建', tasks: '任务列表', agents: 'Agent', tools: '工具与连接', models: '模型接入', history: '运行历史', settings: '设置',
 };
 
 export function App() {
@@ -75,7 +76,7 @@ export function App() {
     if (focusIsLost()) focusMainHeading();
   }, [pageKey]);
 
-  // Global shortcuts: Ctrl+` console, Alt+1…6 sections, Esc closes the status drawer.
+  // Global shortcuts: Ctrl+` console, Alt+1…7 sections, Esc closes the status drawer.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (store.get().peek) {
@@ -98,6 +99,7 @@ export function App() {
       case 'tasks': return <TaskListView />;
       case 'agents': return <AgentsView />;
       case 'tools': return <ToolsView />;
+      case 'models': return <ModelsView />;
       case 'history': return <HistoryView />;
       case 'settings': return <SettingsView />;
     }

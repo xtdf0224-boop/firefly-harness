@@ -1,6 +1,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import './lib/presence';
+import { refreshModels } from './state/models';
 import { flushSave, loadState, saveSoon } from './state/persist';
 import { startEngine } from './state/runner';
 import { store } from './state/store';
@@ -14,12 +16,16 @@ import './styles/console.css';
 import './styles/workspace.css';
 import './styles/views-tasks.css';
 import './styles/views-config.css';
+import './styles/views-live.css';
 
 const initial = loadState(Date.now());
 document.documentElement.dataset.mode = initial.settings.mode;
 store.init(initial, saveSoon);
 startEngine();
+void refreshModels();
 window.addEventListener('pagehide', flushSave);
+// A file dropped on the window must never replace the app page.
+for (const type of ['dragover', 'drop'] as const) window.addEventListener(type, (e) => { if (!e.defaultPrevented) e.preventDefault(); });
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
