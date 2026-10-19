@@ -1,0 +1,108 @@
+/* Reset, typography, focus, scrollbars and the few global utilities. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 700px at 78% -10%, rgb(40 92 110 / 0.20), transparent 60%),
+    radial-gradient(900px 600px at 8% 110%, rgb(70 120 60 / 0.10), transparent 60%),
+    linear-gradient(180deg, var(--night-1), var(--night-0));
+  background-color: var(--night-1);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+  line-height: var(--lh);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+:root[data-mode="sam"] body {
+  background:
+    radial-gradient(1100px 650px at 80% -10%, rgb(30 80 86 / 0.22), transparent 60%),
+    linear-gradient(180deg, var(--night-1), var(--night-0));
+  background-color: var(--night-1);
+}
+
+h1, h2, h3, h4, p, ul, ol, dl, dd, figure, pre { margin: 0; }
+h1, h2, h3, h4 { font-weight: var(--fw-semibold); line-height: var(--lh-tight); letter-spacing: 0.01em; }
+ul, ol { padding: 0; list-style: none; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; }
+button:disabled { cursor: not-allowed; }
+a { color: var(--mint); text-underline-offset: 3px; }
+code, pre, kbd, samp { font-family: var(--font-mono); }
+img, svg { display: block; }
+[hidden] { display: none !important; }
+
+::selection { background: rgb(95 227 200 / 0.28); color: var(--text); }
+
+/* Focus: a clear mint ring, offset so it reads on any surface. */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--mint);
+  outline-offset: 2px;
+}
+/* Focus is moved to the page heading after a view change (lib/focus.ts). It is not a control, so no ring. */
+h1[tabindex="-1"]:focus { outline: none; }
+
+/* Thin, quiet scrollbars. */
+* { scrollbar-width: thin; scrollbar-color: rgb(150 200 195 / 0.22) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: rgb(150 200 195 / 0.2); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
+*::-webkit-scrollbar-thumb:hover { background-color: rgb(150 200 195 / 0.34); }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* ── utilities ── */
+.sr-only {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.mono { font-family: var(--font-mono); }
+.muted { color: var(--text-2); }
+.faint { color: var(--text-3); }
+.nowrap { white-space: nowrap; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* HUD-style label: plain small text in 流萤, mono uppercase in 萨姆. */
+.label {
+  font-family: var(--label-font);
+  font-size: var(--label-size);
+  text-transform: var(--label-transform);
+  letter-spacing: var(--label-spacing);
+  color: var(--text-3);
+  font-weight: var(--fw-medium);
+}
+
+/* ── motion primitives ── */
+@keyframes ff-breathe {
+  0%, 100% { box-shadow: 0 0 0 1px rgb(95 227 200 / 0.18), 0 0 10px -4px rgb(95 227 200 / 0.25); }
+  50%      { box-shadow: 0 0 0 1px rgb(95 227 200 / 0.45), 0 0 24px -2px rgb(95 227 200 / 0.42); }
+}
+@keyframes ff-breathe-dot {
+  0%, 100% { opacity: 0.55; transform: scale(0.85); }
+  50%      { opacity: 1; transform: scale(1.1); }
+}
+@keyframes ff-spin { to { transform: rotate(360deg); } }
+@keyframes ff-fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes ff-shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+@keyframes ff-scan { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+
+/* Running glow — apply to any element that represents live work. */
+.is-breathing { animation: ff-breathe var(--breathe) ease-in-out infinite; }
+.spin { animation: ff-spin 1.6s linear infinite; }
+.enter { animation: ff-fade-up var(--dur-3) var(--ease) both; }
+
+/* Reduced motion: stop everything that moves; keep a steady glow so state is still visible. */
+:root[data-motion="reduced"] *, :root[data-motion="reduced"] *::before, :root[data-motion="reduced"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+:root[data-motion="reduced"] .is-breathing { animation: none !important; box-shadow: 0 0 0 1px rgb(95 227 200 / 0.42), 0 0 16px -4px rgb(95 227 200 / 0.36); }
+:root[data-motion="reduced"] .spin { animation: none !important; }

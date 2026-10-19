@@ -1,0 +1,186 @@
+/* Shell grid: nav | main | status, console spanning main+status underneath.
+   Panels float on the starfield with a small gap — a cockpit of separate instruments. */
+
+.app {
+  position: relative;
+  z-index: 1;
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: var(--nav-w) minmax(0, 1fr) var(--status-w);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "nav main status"
+    "nav console console";
+  gap: var(--gap-shell);
+  padding: var(--gap-shell);
+}
+.app[data-nav="collapsed"] { grid-template-columns: var(--nav-w-collapsed) minmax(0, 1fr) var(--status-w); }
+
+.app > .side-nav { grid-area: nav; }
+.app__main {
+  grid-area: main;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-shell);
+}
+.app__main:focus { outline: none; }
+.app__view { flex: 1; min-height: 0; display: flex; flex-direction: column; animation: ff-rise var(--dur-3) var(--ease); }
+/* Page switch: a transform-only rise with no fill. An opacity animation (or one left filling) would make
+   .app__view a backdrop root, and the glass panels inside it could no longer blur or dim the wallpaper. */
+@keyframes ff-rise { from { transform: translateY(6px); } to { transform: none; } }
+.app > .status-panel { grid-area: status; }
+.app > .console { grid-area: console; }
+
+.skip-link {
+  position: fixed;
+  left: 12px;
+  top: -48px;
+  z-index: 100;
+  padding: 8px 14px;
+  border-radius: var(--control-radius);
+  background: var(--mint);
+  color: var(--text-on-accent);
+  font-weight: var(--fw-semibold);
+  text-decoration: none;
+  transition: top var(--dur-2) var(--ease);
+}
+.skip-link:focus { top: 12px; }
+
+/* < 1280px: the status panel becomes a drawer over the main area. */
+@media (max-width: 1279px) {
+  .app, .app[data-nav="collapsed"] {
+    grid-template-columns: var(--nav-w) minmax(0, 1fr);
+    grid-template-areas:
+      "nav main"
+      "nav console";
+  }
+  .app[data-nav="collapsed"] { grid-template-columns: var(--nav-w-collapsed) minmax(0, 1fr); }
+  .app > .status-panel {
+    position: fixed;
+    top: var(--gap-shell);
+    right: var(--gap-shell);
+    bottom: var(--gap-shell);
+    width: min(var(--status-w), calc(100vw - 2 * var(--gap-shell)));
+    z-index: 40;
+    transform: translateX(calc(100% + 24px));
+    visibility: hidden;
+    transition: transform var(--dur-3) var(--ease), visibility 0s linear var(--dur-3);
+  }
+  .app[data-drawer="open"] > .status-panel {
+    transform: none;
+    visibility: visible;
+    transition: transform var(--dur-3) var(--ease), visibility 0s;
+    background: var(--night-3);
+  }
+  .app__drawer-scrim { position: fixed; inset: 0; z-index: 39; background: var(--scrim); }
+}
+
+/* < 960px: the nav collapses to icons. */
+@media (max-width: 959px) {
+  .app, .app[data-nav="collapsed"], .app[data-nav="open"] { grid-template-columns: var(--nav-w-collapsed) minmax(0, 1fr); }
+}
+
+/* < 640px: single column, nav along the top. */
+@media (max-width: 639px) {
+  body { overflow: auto; }
+  .app, .app[data-nav="collapsed"], .app[data-nav="open"] {
+    height: auto;
+    min-height: 100dvh;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas: "nav" "main" "console";
+  }
+}
+
+/* ── Page views (task list, agents, tools, history, settings, welcome) ── */
+.view { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--gap-shell); overflow: auto; padding-right: 2px; }
+.view__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  padding: var(--sp-5) var(--sp-6) var(--sp-4);
+}
+.view__heading { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.view__title { font-size: var(--fs-xl); color: var(--text); display: flex; align-items: center; gap: var(--sp-2); }
+.view__desc { font-size: var(--fs-sm); color: var(--text-3); max-width: 70ch; }
+.view__actions { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.view__section { display: flex; flex-direction: column; gap: var(--sp-3); }
+/* Views scroll as a whole; their panels keep their natural height instead of shrinking. */
+.view > .panel, .view > .view__section, .view > * { flex: none; }
+
+/* Wallpaper on: page titles sit on the art, so each gets its own soft glass band (fades to the right
+   so it never reads as a box) and a faint shadow under the text. */
+:root[data-wallpaper="on"] .view__header { position: relative; isolation: isolate; }
+:root[data-wallpaper="on"] .view__header::before {
+  content: "";
+  position: absolute;
+  inset: 6px 0 2px;
+  z-index: -1;
+  border-radius: var(--panel-radius);
+  corner-shape: var(--corner);
+  background: linear-gradient(90deg, rgb(5 9 18 / 0.5), rgb(5 9 18 / 0.38) 50%, rgb(5 9 18 / 0.12) 85%, transparent);
+  backdrop-filter: blur(12px) brightness(var(--glass-dim, 0.58));
+  -webkit-mask-image: linear-gradient(90deg, #000 70%, transparent);
+  mask-image: linear-gradient(90deg, #000 70%, transparent);
+}
+:root[data-wallpaper="on"] .view__desc { color: var(--text-2); }
+
+/* Small tags (status chips, badges, 模拟 tags, message kinds, step numbers) are read at 11–12px on a
+   faint tint: give them a dark base under the tint so a bright patch of art never shows through. */
+:root[data-wallpaper="on"] :is(.chip, .badge, .ws-kind, .tool-call__tool, .ws-plan__item[data-status="failed"] .ws-plan__step) {
+  background-image: linear-gradient(var(--c-soft), var(--c-soft));
+  background-color: rgb(6 10 19 / 0.86);
+}
+:root[data-wallpaper="on"] :is(.sim-tag, .kbd:not(:is(.btn--primary, .btn--warning, .btn--success) .kbd)) { background-color: rgb(6 10 19 / 0.86); }
+:root[data-wallpaper="on"] .settings-mode { background: rgb(6 10 19 / 0.82); }
+/* Cards outside panels behave like panels: what shows through them is dimmed, not just blurred. */
+:root[data-wallpaper="on"] :is(.new-task-recent__card, .history-tile) {
+  backdrop-filter: blur(var(--blur)) brightness(var(--glass-dim, 0.7)) saturate(1.3);
+}
+
+/* Text halo over the art: only the pixels right around each glyph darken, so panels can stay clear. */
+:root[data-wallpaper="on"] .app { text-shadow: var(--text-halo); }
+/* …except where the backing is already solid, or the text sits on a bright fill. */
+:root[data-wallpaper="on"] :is(pre, code, input, textarea, select, .kbd, .btn--primary, .btn--warning, .btn--success,
+  .segmented__opt.is-selected, .new-task-hero__title, .task-list-filter.is-active, .history-filter.is-on) { text-shadow: none; }
+/* Two spots that sit on the art with the least backing: page headers and tool-name pills use the
+   second grey instead of the faintest one. */
+:root[data-wallpaper="on"] .view__header { --text-3: var(--text-2); }
+:root[data-wallpaper="on"] .tool-call__tool { background: rgb(6 10 19 / 0.95); padding: 2px 7px; }
+:root[data-wallpaper="on"] .agents-legend { padding: 2px 10px; border-radius: var(--chip-radius); corner-shape: var(--corner); background: rgb(6 10 19 / 0.72); }
+
+/* 赏图: the interface fades out; only the wallpaper, the fireflies and the peek bar remain. */
+.app { transition: opacity 450ms var(--ease); }
+:root[data-peek="on"] .app { opacity: 0; pointer-events: none; }
+:root[data-peek="on"] .toast-host { display: none; }
+.peek-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  max-width: calc(100vw - 32px);
+  padding: 6px 6px 6px var(--sp-4);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  corner-shape: var(--corner);
+  background: rgb(6 10 19 / 0.72);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-pop);
+  text-shadow: var(--text-halo);
+  transform: translateX(-50%);
+  animation: peek-in 450ms var(--ease) both;
+}
+@keyframes peek-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translateX(-50%); } }
+:root[data-mode="sam"] .peek-bar { border-radius: 8px; }
+.peek-bar__title { font-size: var(--fs-sm); color: var(--text); white-space: nowrap; }
+.peek-bar__credit { font-size: var(--fs-xs); color: var(--text-2); white-space: nowrap; }
+.peek-bar__credit:hover { color: var(--mint); }
+.peek-bar__back { flex: none; }

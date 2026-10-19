@@ -1,0 +1,219 @@
+/* 萤火 · Agent 工作台 — design tokens
+   Night-blue and charcoal ground; mint-cyan and firefly-green as the two energy colours; silver
+   for text; warm gold used sparingly (pending decisions, small highlights).
+   Two visual modes share one layout:
+     · 流萤 Firefly (default): soft, quiet, rounded, translucent, fireflies drift.
+     · 萨姆 SAM: armour — bevelled corners, brighter seams and energy lines, HUD labels, fewer particles.
+   Every component reads these variables; nothing hard-codes a colour. */
+
+:root {
+  color-scheme: dark;
+
+  /* ── type ── */
+  --font-sans: "HarmonyOS Sans SC", "MiSans", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "Cascadia Mono", "Sarasa Mono SC", Consolas, "Microsoft YaHei UI", monospace;
+  /* Scale: every text size is one of these. */
+  --fs-2xs: 11px;  /* meta, kbd, tags */
+  --fs-xs: 12px;   /* captions, table meta */
+  --fs-sm: 13px;   /* secondary text, logs */
+  --fs-md: 14px;   /* body / controls */
+  --fs-lg: 16px;   /* panel titles */
+  --fs-xl: 20px;   /* page titles */
+  --fs-2xl: 26px;  /* task title */
+  --fs-hero: 40px; /* welcome headline */
+  --lh-tight: 1.3;
+  --lh: 1.6;
+  --lh-mono: 1.55;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+
+  /* ── night ground ── */
+  --night-0: #05080f;
+  --night-1: #080d18;   /* app background */
+  --night-2: #0b1221;   /* sunken wells */
+  --night-3: #0f1829;   /* solid panel */
+  --night-4: #15213a;   /* raised */
+  --charcoal: #12151b;
+  /* Fixed copies of the 流萤 ground, for miniatures that must look the same whichever mode is active
+     (the mode picker's preview card). --night-* itself follows the mode. */
+  --night-fx-0: #05080f;
+  --night-fx-1: #080d18;
+  --night-fx-2: #0b1221;
+  --night-fx-3: #0f1829;
+  --night-fx-4: #15213a;
+
+  /* ── surfaces (translucent over the starfield) ── */
+  --surface: rgb(12 19 33 / 0.72);
+  --surface-strong: rgb(10 16 28 / 0.92);   /* code, logs, terminal: near-opaque for legibility */
+  --surface-raised: rgb(21 32 54 / 0.78);
+  --surface-sunken: rgb(5 9 17 / 0.55);
+  --surface-hover: rgb(124 232 210 / 0.06);
+  --surface-active: rgb(124 232 210 / 0.11);
+  --scrim: rgb(3 6 12 / 0.66);
+
+  /* ── lines ── */
+  --line: rgb(168 222 214 / 0.11);
+  --line-2: rgb(168 222 214 / 0.19);
+  --line-strong: rgb(168 230 216 / 0.32);
+
+  /* ── text (silver-white) ── */
+  --text: #e6eef2;
+  --text-2: #aebdc8;
+  --text-3: #8494a3;
+  --text-4: #5c6b79;   /* decoration and disabled only — never body text */
+  --text-on-accent: #04201b;
+
+  /* ── energy ── */
+  --mint: #5fe3c8;
+  --mint-strong: #93f2df;
+  --mint-soft: rgb(95 227 200 / 0.13);
+  --mint-line: rgb(95 227 200 / 0.42);
+  --firefly: #b5f26b;
+  --firefly-soft: rgb(181 242 107 / 0.13);
+  --firefly-glow: rgb(196 255 120 / 0.85);
+  --silver: #d3dee7;
+  --gold: #f2c879;
+  --gold-soft: rgb(242 200 121 / 0.13);
+  /* Button gradients (top → bottom) and the dark ink that sits on them. */
+  --mint-top: #74ecd4;
+  --mint-bottom: #4fd3b8;
+  --mint-top-hover: #8af3de;
+  --gold-top: #f6d48f;
+  --gold-bottom: #eabd66;
+  --gold-top-hover: #f9dc9f;
+  --success-top: #c3f58d;
+  --success-top-hover: #cff9a0;
+  --on-gold: #1f1606;
+  --on-success: #0e1d05;
+  /* Code and diff text. */
+  --code-fg: #d5e2e8;
+  --diff-add-fg: #c9f5a8;
+  --diff-del-fg: #ffc0b6;
+
+  /* ── status tones (always paired with an icon + text) ── */
+  --tone-neutral: #9fb0be;   --tone-neutral-soft: rgb(159 176 190 / 0.12);
+  --tone-info: #82c8ff;      --tone-info-soft: rgb(130 200 255 / 0.13);
+  --tone-running: var(--mint); --tone-running-soft: var(--mint-soft);
+  --tone-success: #a6ec7a;   --tone-success-soft: rgb(166 236 122 / 0.13);
+  --tone-warning: var(--gold); --tone-warning-soft: var(--gold-soft);
+  --tone-danger: #ff8b7b;    --tone-danger-soft: rgb(255 139 123 / 0.13);
+  --tone-paused: #a9bccf;    --tone-paused-soft: rgb(169 188 207 / 0.13);
+
+  /* ── light & depth ── */
+  --glow-mint: 0 0 0 1px rgb(95 227 200 / 0.32), 0 0 22px -2px rgb(95 227 200 / 0.32);
+  --glow-mint-soft: 0 0 18px -4px rgb(95 227 200 / 0.28);
+  --glow-firefly: 0 0 16px rgb(181 242 107 / 0.35);
+  --glow-gold: 0 0 0 1px rgb(242 200 121 / 0.35), 0 0 18px -4px rgb(242 200 121 / 0.35);
+  --glow-danger: 0 0 0 1px rgb(255 139 123 / 0.35), 0 0 18px -6px rgb(255 139 123 / 0.4);
+  --shadow-panel: 0 18px 48px -26px rgb(0 0 0 / 0.85), 0 2px 6px -2px rgb(0 0 0 / 0.45);
+  --shadow-pop: 0 24px 60px -18px rgb(0 0 0 / 0.8), 0 0 0 1px var(--line-2);
+  --energy-line: linear-gradient(90deg, transparent, var(--mint) 22%, var(--firefly) 62%, transparent);
+  --energy-opacity: 0.5;
+  --seam: var(--mint-line);          /* short armour seam on panel tops */
+  --seam-width: 44px;
+  --blur: 16px;
+
+  /* ── space ── */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
+  --gap-shell: 10px;
+
+  /* ── shape (mode-dependent) ── */
+  --r-xs: 4px;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --panel-radius: var(--r-lg);
+  --card-radius: var(--r-md);
+  --control-radius: var(--r-sm);
+  --chip-radius: 999px;
+  --corner: round;                   /* corner-shape where supported */
+
+  /* ── labels (mode-dependent) ── */
+  --label-font: var(--font-sans);
+  --label-transform: none;
+  --label-spacing: 0.02em;
+  --label-size: var(--fs-xs);
+
+  /* ── motion ── */
+  --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-1: 120ms;
+  --dur-2: 220ms;
+  --dur-3: 420ms;
+  --breathe: 3.2s;
+
+  /* ── layout ── */
+  --nav-w: 232px;
+  --nav-w-collapsed: 64px;
+  --status-w: 316px;
+  --console-bar-h: 40px;
+}
+
+/* ── 萨姆 SAM mode ── armour plating: bevelled corners, brighter seams, HUD labels ── */
+:root[data-mode="sam"] {
+  /* The solid ground leans charcoal: dialogs, toasts, the drawer and menus read as the same armour. */
+  --night-0: #05070a;
+  --night-1: #090c12;
+  --night-2: #0d1117;
+  --night-3: #12151b;
+  --night-4: #181c24;
+  --surface: rgb(11 14 21 / 0.84);
+  --surface-raised: rgb(19 25 36 / 0.86);
+  --surface-strong: rgb(8 11 17 / 0.95);
+  --line: rgb(140 236 214 / 0.16);
+  --line-2: rgb(140 236 214 / 0.27);
+  --line-strong: rgb(140 236 214 / 0.45);
+  --energy-opacity: 0.95;
+  --seam: var(--mint);
+  --seam-width: 72px;
+  --blur: 10px;
+  --glow-mint: 0 0 0 1px rgb(95 227 200 / 0.55), 0 0 26px -2px rgb(95 227 200 / 0.45);
+  --panel-radius: 4px;
+  --card-radius: 3px;
+  --control-radius: 3px;
+  --chip-radius: 3px;
+  --label-font: var(--font-mono);
+  --label-transform: uppercase;
+  --label-spacing: 0.1em;
+  --label-size: var(--fs-2xs);
+  --breathe: 2.2s;
+}
+
+/* Real bevels where the browser supports corner-shape; plain small radii elsewhere. */
+@supports (corner-shape: bevel) {
+  :root[data-mode="sam"] {
+    --corner: bevel;
+    --panel-radius: 14px;
+    --card-radius: 9px;
+    --control-radius: 7px;
+    --chip-radius: 6px;
+  }
+}
+
+/* Reduced motion: set by the app on <html data-motion="reduced"> (from Settings or the OS). */
+:root[data-motion="reduced"] {
+  --dur-1: 0ms;
+  --dur-2: 0ms;
+  --dur-3: 0ms;
+}
+
+/* ── Wallpaper on: clear smoked glass + text halos ──
+   --glass-a / --glass-dim / --glass-blur come from 面板通透度 (Wallpaper.tsx). Panels stay thin so the art
+   shows; legibility comes from a halo around every glyph (--text-halo, applied in app.css) plus a
+   slightly brighter text palette. Dense containers (cards, inputs, code) keep more opaque backings. */
+:root[data-wallpaper="on"] {
+  --text-2: #c3cfd8;
+  /* The faintest grey moves toward --text-2 as panels get clearer (Wallpaper.tsx sets --text-3-wp). */
+  --text-3: var(--text-3-wp, #adbac6);
+  /* Stronger as panels get clearer (--halo-k = 面板通透度 0…1). */
+  --text-halo: 0 0 1px rgb(3 6 12 / 0.95), 0 0 3px rgb(3 6 12 / calc(0.82 + 0.16 * var(--halo-k, 0.65))), 0 0 8px rgb(3 6 12 / calc(0.45 + 0.4 * var(--halo-k, 0.65)));
+  --surface: rgb(8 14 26 / var(--glass-a, 0.5));
+  --surface-raised: rgb(12 20 35 / calc(var(--glass-a, 0.5) + 0.2));
+  --surface-sunken: rgb(4 8 15 / 0.7);
+  --blur: var(--glass-blur, 12px);
+}
+:root[data-wallpaper="on"][data-mode="sam"] {
+  --surface: rgb(9 12 17 / var(--glass-a, 0.5));
+  --surface-raised: rgb(15 20 28 / calc(var(--glass-a, 0.5) + 0.2));
+  --surface-sunken: rgb(4 6 9 / 0.72);
+}

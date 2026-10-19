@@ -1,0 +1,89 @@
+{
+  "name": "firefly-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "萤火 · Agent 工作台 — 以《崩坏：星穹铁道》流萤 / 萨姆为灵感的 AI Agent Harness 桌面工作台（非官方同人项目，当前为模拟后端演示）",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5317 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview --port 5318 --strictPort",
+    "typecheck": "tsc --noEmit",
+    "verify": "tsc --noEmit && npm run check:engine && vite build && node scripts/check-build.mjs",
+    "check:engine": "rolldown scripts/engine-check.ts --platform node --format esm --file node_modules/.cache/engine-check.mjs && node node_modules/.cache/engine-check.mjs",
+    "legal": "rolldown scripts/gen-legal.ts --platform node --format esm --file node_modules/.cache/gen-legal.mjs && node node_modules/.cache/gen-legal.mjs",
+    "app": "vite build && electron .",
+    "dist:win": "npm run legal && npm run verify && electron-builder --win nsis portable"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "immer": "11.1.21",
+    "lucide-react": "1.51.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.2"
+  },
+  "author": "xtdf0224-boop",
+  "license": "MIT",
+  "homepage": "https://github.com/xtdf0224-boop/firefly-harness",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xtdf0224-boop/firefly-harness.git"
+  },
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "io.github.xtdf0224-boop.firefly-harness",
+    "productName": "FireflyHarness",
+    "copyright": "Copyright © 2026 xtdf0224-boop",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.ico",
+      "executableName": "FireflyHarness",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "萤火 Agent 工作台",
+      "uninstallDisplayName": "萤火 Agent 工作台",
+      "license": "build/license.txt",
+      "language": "2052",
+      "installerLanguages": [
+        "zh_CN"
+      ],
+      "artifactName": "FireflyHarness-Setup-${version}.exe",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    },
+    "portable": {
+      "artifactName": "FireflyHarness-${version}-portable.exe"
+    },
+    "electronDist": "node_modules/electron/dist"
+  },
+  "allowScripts": {
+    "electron@44.5.1": true
+  }
+}

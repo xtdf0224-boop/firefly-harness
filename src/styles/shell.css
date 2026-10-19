@@ -1,0 +1,654 @@
+/* Shell region: left navigation, right status panel, approval card, connection banner, toasts and
+   dialog hosts. Everything reads tokens; 萨姆-only decoration hangs off :root[data-mode="sam"].
+   Class prefixes: .side-nav · .status-panel · .approval-card · .conn-banner · .toast · .shell-* */
+
+/* ───────────── shared ───────────── */
+
+/* Text-style button used for "task title" links inside cards and panels. */
+.shell-link {
+  display: inline-block;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  vertical-align: bottom;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-size: inherit;
+  color: var(--mint);
+  text-decoration: underline;
+  text-decoration-color: rgb(95 227 200 / 0.4);
+  text-underline-offset: 3px;
+  border-radius: 2px;
+}
+.shell-link:hover { color: var(--mint-strong); text-decoration-color: currentColor; }
+
+.shell-dialog-subject { color: var(--text); font-weight: var(--fw-medium); overflow-wrap: anywhere; }
+.shell-dialog-list { display: grid; gap: 6px; margin-top: var(--sp-3); font-size: var(--fs-sm); }
+.shell-dialog-list li { position: relative; padding-left: 16px; }
+.shell-dialog-list li::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0.62em;
+  width: 5px;
+  height: 5px;
+  transform: rotate(45deg);
+  background: var(--gold);
+}
+
+/* ───────────── side nav ───────────── */
+
+.side-nav {
+  min-width: 0;
+  padding: var(--sp-4) var(--sp-3) var(--sp-3);
+  gap: var(--sp-4);
+}
+
+.side-nav__top { display: flex; flex-direction: column; gap: var(--sp-3); flex: none; }
+
+.side-nav__brandrow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.side-nav__brand { position: relative; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.side-nav__brand > svg { flex: none; }
+.side-nav__brandtext { display: flex; flex-direction: column; gap: 2px; min-width: 0; line-height: 1.15; }
+.side-nav__name { font-size: var(--fs-lg); font-weight: var(--fw-semibold); letter-spacing: 0.06em; color: var(--text); }
+.side-nav__sub { white-space: nowrap; }
+
+/* 演示模式 marker: dashed gold, same family as SimTag. */
+.side-nav__demo {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  border: 1px dashed rgb(242 200 121 / 0.5);
+  background: rgb(242 200 121 / 0.07);
+  color: var(--gold);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  white-space: nowrap;
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+.side-nav__demo:hover { background: rgb(242 200 121 / 0.14); border-color: rgb(242 200 121 / 0.75); }
+
+.side-nav__cta { position: relative; width: 100%; }
+.side-nav__cta[aria-current="page"] {
+  box-shadow: 0 0 0 2px var(--night-3), 0 0 0 4px var(--mint-strong), 0 8px 22px -10px rgb(95 227 200 / 0.6);
+}
+
+/* Scrolls on its own so the footer stays pinned; padding keeps focus rings from being clipped. */
+.side-nav__scroll {
+  flex: 1;
+  min-height: 0;
+  margin: 0 calc(-1 * var(--sp-1));
+  padding: var(--sp-1);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.side-nav__list { display: flex; flex-direction: column; gap: 2px; }
+
+.side-nav__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  height: 38px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--control-radius);
+  corner-shape: var(--corner);
+  color: var(--text-2);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+  text-align: left;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.side-nav__item > svg { flex: none; color: var(--text-3); transition: color var(--dur-1) var(--ease); }
+.side-nav__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-nav__item .side-nav__badge { margin-left: auto; flex: none; }
+.side-nav__item:hover { background: var(--surface-hover); color: var(--text); }
+.side-nav__item:hover > svg { color: var(--mint); }
+:root[data-mode="sam"] .side-nav__item { letter-spacing: 0.04em; }
+
+/* Current section: raised background, a short mint→firefly energy line on the left edge. */
+.side-nav__item[aria-current="page"] { background: var(--surface-active); color: var(--text); }
+.side-nav__item[aria-current="page"] > svg { color: var(--mint); }
+.side-nav__item[aria-current="page"]::before,
+.side-nav__recent-item[aria-current]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(180deg, var(--mint), var(--firefly));
+  box-shadow: 0 0 10px rgb(95 227 200 / 0.5);
+}
+/* 萨姆: a small bevelled notch cut into the right edge of the current item. */
+:root[data-mode="sam"] .side-nav__item[aria-current="page"]::after,
+:root[data-mode="sam"] .side-nav__recent-item[aria-current]::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 8px;
+  height: 14px;
+  transform: translateY(-50%);
+  background: var(--mint);
+  clip-path: polygon(100% 0, 100% 100%, 0 50%);
+}
+
+/* 最近任务 */
+.side-nav__recent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.side-nav__recent-title { padding: 0 var(--sp-3); margin-bottom: 2px; }
+.side-nav__recent-list { display: flex; flex-direction: column; gap: 2px; }
+.side-nav__recent-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--control-radius);
+  corner-shape: var(--corner);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  text-align: left;
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.side-nav__recent-item:hover { background: var(--surface-hover); color: var(--text); }
+/* Status = the icon's shape (circle-dot / pause / hand / check / octagon / ban …) plus colour, never colour alone. */
+.side-nav__status-icon { --c: var(--tone-neutral); display: inline-flex; flex: none; color: var(--c); }
+.side-nav__status-icon[data-tone="info"]    { --c: var(--tone-info); }
+.side-nav__status-icon[data-tone="running"] { --c: var(--tone-running); }
+.side-nav__status-icon[data-tone="success"] { --c: var(--tone-success); }
+.side-nav__status-icon[data-tone="warning"] { --c: var(--tone-warning); }
+.side-nav__status-icon[data-tone="danger"]  { --c: var(--tone-danger); }
+.side-nav__status-icon[data-tone="paused"]  { --c: var(--tone-paused); }
+.side-nav__status-icon.is-live svg { animation: ff-breathe-dot var(--breathe) ease-in-out infinite; }
+:root[data-motion="reduced"] .side-nav__status-icon.is-live svg { animation: none; opacity: 1; transform: none; }
+.side-nav__recent-item[aria-current] { background: var(--surface-active); color: var(--text); }
+.side-nav__recent-item[aria-current]::before { top: 7px; bottom: 7px; }
+.side-nav__recent-empty { padding: 0 var(--sp-3); font-size: var(--fs-xs); color: var(--text-3); }
+
+/* Footer: visual mode + collapse */
+.side-nav__footer {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+  gap: var(--sp-1);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+/* Opens the status drawer (only rendered below 1280px, where the panel is off-canvas). */
+.side-nav__status-btn { grid-column: 1 / -1; border: 1px solid var(--line); background: var(--surface-sunken); }
+.side-nav__status-btn:hover { border-color: var(--line-2); }
+.side-nav__mode { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.side-nav__mode .segmented { width: 100%; }
+.side-nav__mode .segmented__opt { flex: 1; justify-content: center; padding: 0 6px; }
+
+/* ── compact: manually collapsed, or viewport < 960px (TSX sets data-compact for both) ── */
+.side-nav[data-compact="true"] { padding: var(--sp-3) var(--sp-2); gap: var(--sp-3); }
+.side-nav[data-compact="true"] .side-nav__top,
+.side-nav[data-compact="true"] .side-nav__brandrow,
+.side-nav[data-compact="true"] .side-nav__list,
+.side-nav[data-compact="true"] .side-nav__footer { align-items: center; justify-items: center; }
+.side-nav[data-compact="true"] .side-nav__brandrow { justify-content: center; flex-direction: column; gap: var(--sp-2); }
+/* Labels stay in the accessibility tree (names, tooltips) but are not drawn. */
+.side-nav[data-compact="true"] .side-nav__label,
+.side-nav[data-compact="true"] .side-nav__brandtext,
+.side-nav[data-compact="true"] .side-nav__cta .btn__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* The 演示模式 marker is the global honesty marker, so it keeps a word in the rail: icon over 「演示」. */
+@media (min-width: 640px) {
+  .side-nav[data-compact="true"] .side-nav__demo {
+    width: 40px;
+    height: auto;
+    min-height: 34px;
+    padding: 5px 0 4px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+  }
+  .side-nav[data-compact="true"] .side-nav__demo-more {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+.side-nav[data-compact="true"] .side-nav__cta { width: 40px; height: 40px; padding: 0; }
+.side-nav[data-compact="true"] .side-nav__item { width: 40px; height: 40px; padding: 0; justify-content: center; }
+.side-nav[data-compact="true"] .side-nav__item[aria-current="page"]::before { left: calc(-1 * var(--sp-2) - 1px); top: 10px; bottom: 10px; }
+/* Badges shrink to corner dots; the text alternative remains. */
+.side-nav[data-compact="true"] .side-nav__badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  min-width: 0;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+  font-size: 0;
+  color: transparent;
+  background: var(--c);
+  border: 2px solid var(--night-3);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--c) 60%, transparent);
+}
+/* Danger dot is a diamond and the pending-approval dot a square, so both differ from the round "running" dot without colour. */
+.side-nav[data-compact="true"] .side-nav__badge.badge--danger { border-radius: 2px; transform: rotate(45deg); }
+.side-nav[data-compact="true"] .side-nav__badge.badge--warning { border-radius: 2px; }
+.side-nav[data-compact="true"] .side-nav__footer { grid-template-columns: 1fr; gap: var(--sp-2); }
+
+/* ── < 640px: top bar in two rows (nothing scrolls sideways, so the mode switch and 设置 are always reachable):
+      brand + 演示模式 ........ 状态 · 视觉模式
+      新建任务 · 5 个导航图标 ── */
+@media (max-width: 639px) {
+  .side-nav {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand brand footer"
+      "cta   list  list";
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
+  }
+  .side-nav__top, .side-nav__scroll { display: contents; }
+  .side-nav__brandrow { grid-area: brand; }
+  .side-nav__cta { grid-area: cta; }
+  .side-nav__list { grid-area: list; }
+  .side-nav__footer { grid-area: footer; }
+  .side-nav[data-compact="true"] .side-nav__top { flex-direction: row; }
+  .side-nav[data-compact="true"] .side-nav__brandrow { flex-direction: row; flex-wrap: nowrap; justify-content: flex-start; gap: var(--sp-3); }
+  .side-nav__list { flex-direction: row; justify-content: space-between; gap: var(--sp-1); }
+  .side-nav__cta, .side-nav__item, .side-nav__demo, .side-nav__mode-btn { flex: none; }
+  .side-nav[data-compact="true"] .side-nav__footer {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    gap: var(--sp-2);
+    padding-top: 0;
+    border-top: 0;
+  }
+  .side-nav__mode-btn { width: 40px; height: 40px; }
+  .side-nav[data-compact="true"] .side-nav__item[aria-current="page"]::before { left: 8px; right: 8px; top: auto; bottom: -2px; width: auto; height: 3px; border-radius: 3px 3px 0 0; background: linear-gradient(90deg, var(--mint), var(--firefly)); }
+  .side-nav[data-compact="true"] .side-nav__badge { top: 4px; right: 4px; }
+}
+
+/* ───────────── status panel ───────────── */
+
+.status-panel { min-width: 0; }
+
+.status-panel__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.status-panel__scroll {
+  position: relative; /* offsetParent for the scroll-to-approvals maths */
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-radius: 0 0 var(--panel-radius) var(--panel-radius);
+  corner-shape: var(--corner);
+}
+
+.status-panel__section {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  transition: box-shadow var(--dur-3) var(--ease);
+}
+.status-panel__section + .status-panel__section { border-top: 1px solid var(--line); }
+.status-panel__section:focus { outline: none; }
+.status-panel__section:focus-visible { outline: 2px solid var(--mint); outline-offset: -2px; border-radius: var(--card-radius); }
+
+.status-panel__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 20px; }
+.status-panel__heading { display: inline-flex; align-items: center; min-width: 0; }
+:root[data-mode="sam"] .status-panel__heading::before {
+  content: "";
+  width: 10px;
+  height: 2px;
+  margin-right: 6px;
+  background: var(--mint);
+  box-shadow: 0 0 6px rgb(95 227 200 / 0.6);
+}
+
+.status-panel__muted { font-size: var(--fs-xs); color: var(--text-3); }
+.status-panel__skipped { margin-left: 4px; font-size: var(--fs-xs); color: var(--text-3); }
+/* base.css resets margins on p/ul/figure but not dl, so the UA's 1em block margin would leak in. */
+.status-panel .kv { margin: 0; }
+
+/* 运行 */
+.status-panel__viewing { display: flex; align-items: baseline; gap: 4px; min-width: 0; font-size: var(--fs-xs); color: var(--text-3); }
+.status-panel__viewing > span { flex: none; }
+.status-panel__run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  corner-shape: var(--corner);
+  background: var(--surface-sunken);
+}
+.status-panel__runhead { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.status-panel__chip { display: inline-flex; }
+.status-panel__runno { font-size: var(--fs-sm); color: var(--text-2); font-variant-numeric: tabular-nums; margin-right: auto; }
+.status-panel__note { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--tone-paused); }
+.status-panel__note svg { flex: none; }
+.status-panel__step {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+/* 萨姆: tiny corner ticks on the run frame. */
+:root[data-mode="sam"] .status-panel__run { position: relative; border-color: var(--line-2); }
+:root[data-mode="sam"] .status-panel__run::after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  bottom: -1px;
+  width: 28px;
+  height: 2px;
+  background: var(--mint);
+  opacity: 0.7;
+}
+
+/* 活跃 Agent */
+.status-panel__agents { display: flex; flex-direction: column; gap: var(--sp-1); margin: 0 calc(-1 * var(--sp-2)); }
+.status-panel__agent {
+  --c: var(--tone-neutral);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
+  padding: var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--card-radius);
+  corner-shape: var(--corner);
+}
+.status-panel__agent[data-tone="info"]    { --c: var(--tone-info); }
+.status-panel__agent[data-tone="running"] { --c: var(--tone-running); }
+.status-panel__agent[data-tone="success"] { --c: var(--tone-success); }
+.status-panel__agent[data-tone="warning"] { --c: var(--tone-warning); }
+.status-panel__agent[data-tone="danger"]  { --c: var(--tone-danger); }
+.status-panel__agent[data-tone="paused"]  { --c: var(--tone-paused); }
+.status-panel__agent.is-live {
+  border-color: color-mix(in srgb, var(--c) 34%, transparent);
+  background: color-mix(in srgb, var(--c) 8%, transparent);
+}
+.status-panel__agent > span { margin-top: 2px; }
+.status-panel__agent-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.status-panel__agent-top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.status-panel__agent-name { font-size: var(--fs-sm); font-weight: var(--fw-medium); color: var(--text); }
+.status-panel__agent-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.status-panel__agent-model { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); overflow-wrap: anywhere; }
+
+/* 模型 / 上下文 / Token */
+.status-panel__model { overflow-wrap: anywhere; font-size: var(--fs-xs); }
+.status-panel__figure { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; font-size: var(--fs-sm); color: var(--text); }
+.status-panel__warn { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font-size: var(--fs-xs); font-weight: var(--fw-medium); color: var(--tone-warning); }
+.status-panel__warn.is-danger { color: var(--tone-danger); }
+.status-panel__stats { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); margin: 0; }
+.status-panel__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius);
+  corner-shape: var(--corner);
+  background: var(--surface-sunken);
+}
+.status-panel__stat dt { font-size: var(--fs-2xs); color: var(--text-3); }
+.status-panel__stat dd { margin: 0; font-size: var(--fs-md); color: var(--text); }
+.status-panel__stat.is-total { border-color: var(--mint-line); }
+.status-panel__stat.is-total dd { color: var(--mint-strong); }
+.status-panel .sparkline { width: 100%; height: auto; }
+
+/* 待确认操作 */
+.status-panel__section--approvals.has-pending { background: linear-gradient(180deg, var(--gold-soft), transparent 140px); }
+.status-panel__section.is-flash { box-shadow: inset 0 0 0 1px var(--tone-warning), inset 0 0 28px -8px rgb(242 200 121 / 0.5); }
+.status-panel__approvals { display: flex; flex-direction: column; gap: var(--sp-3); }
+.status-panel__none { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-2); }
+.status-panel__none svg { flex: none; color: var(--tone-success); }
+
+/* ───────────── approval card ───────────── */
+
+.approval-card {
+  --c: var(--tone-warning);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) calc(var(--sp-3) + 3px);
+  border: 1px solid rgb(242 200 121 / 0.42);
+  border-radius: var(--card-radius);
+  corner-shape: var(--corner);
+  background: linear-gradient(90deg, var(--gold-soft), transparent 70%), var(--surface-strong);
+  box-shadow: inset 3px 0 0 var(--c), 0 0 20px -10px rgb(242 200 121 / 0.45);
+}
+/* 萨姆: hazard ticks on the top edge of a pending request. */
+:root[data-mode="sam"] .approval-card[data-status="pending"]::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: 14px;
+  width: 30px;
+  height: 5px;
+  background: repeating-linear-gradient(135deg, var(--tone-warning) 0 2px, transparent 2px 5px);
+  opacity: 0.75;
+  pointer-events: none;
+}
+/* Decided: the gold edge goes away so the card recedes. */
+.approval-card.is-decided {
+  --c: var(--tone-neutral);
+  border-color: var(--line);
+  background: var(--surface-strong);
+  box-shadow: none;
+}
+.approval-card.is-decided .approval-card__title { color: var(--text-2); }
+.approval-card.is-decided .approval-card__icon { color: var(--text-3); }
+
+.approval-card__head { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.approval-card__icon { flex: none; margin-top: 2px; color: var(--c); }
+.approval-card:focus { outline: none; }
+.approval-card:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+.approval-card__title { flex: 1; min-width: 0; font-size: var(--fs-md); font-weight: var(--fw-semibold); line-height: var(--lh-tight); color: var(--text); overflow-wrap: anywhere; }
+.approval-card__head .sim-tag { margin-top: 1px; }
+.approval-card__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; font-size: var(--fs-xs); color: var(--text-2); }
+.approval-card__who { flex: 0 1 auto; min-width: 0; }
+.approval-card__time { margin-left: auto; font-size: var(--fs-xs); color: var(--text-3); white-space: nowrap; }
+.approval-card__reason { font-size: var(--fs-sm); color: var(--text-2); overflow-wrap: anywhere; }
+.approval-card__task { display: flex; align-items: baseline; gap: 2px; min-width: 0; font-size: var(--fs-xs); color: var(--text-3); }
+.approval-card__task > span { flex: none; }
+
+.approval-card__toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 6px 0 2px;
+  border-radius: 4px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+.approval-card__toggle:hover { color: var(--text); background: var(--surface-hover); }
+.approval-card__preview[hidden] { display: none; }
+
+/* Says out loud that approving only moves the simulator along — nothing is written or executed. */
+.approval-card__sim {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px dashed rgb(242 200 121 / 0.45);
+  border-radius: var(--control-radius);
+  corner-shape: var(--corner);
+  background: rgb(242 200 121 / 0.06);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.approval-card__sim svg { flex: none; margin-top: 3px; color: var(--gold); }
+.approval-card__actions { display: flex; gap: var(--sp-2); margin-top: 2px; }
+.approval-card--compact .approval-card__actions .btn { flex: 1; }
+.approval-card__decided { display: flex; align-items: center; gap: var(--sp-2); }
+
+/* ───────────── connection banner ───────────── */
+
+/* Container so the shared .callout can stack its buttons under the text when the main area is narrow. */
+.conn-banner { flex: none; container-type: inline-size; animation: ff-fade-up var(--dur-3) var(--ease) both; }
+.conn-banner .callout__text { font-variant-numeric: tabular-nums; }
+/* 萨姆: faint diagonal hazard stripes behind the disconnected state. */
+:root[data-mode="sam"] .conn-banner .callout--danger {
+  background:
+    repeating-linear-gradient(135deg, rgb(255 139 123 / 0.07) 0 8px, transparent 8px 16px),
+    linear-gradient(90deg, var(--c-soft), transparent 75%),
+    var(--surface-strong);
+}
+
+/* ───────────── toasts ───────────── */
+/* Position comes from two variables so the breakpoint rules below can never lose a specificity fight with the
+   base rule (they used to, which pushed the stack off-screen on phones). `--toast-lift` is set by ToastHost to
+   keep the stack above the workspace composer instead of over its input and Send button. */
+.toast-host {
+  /* Inside the main column: never over the status panel (where approvals live) … */
+  --toast-right: calc(var(--status-w) + 2 * var(--gap-shell) + var(--sp-3));
+  /* … and above the console bar, or above the open console. */
+  --toast-bottom: calc(var(--console-bar-h) + 2 * var(--gap-shell) + var(--sp-2));
+  position: fixed;
+  right: var(--toast-right);
+  bottom: calc(var(--toast-bottom) + var(--toast-lift, 0px));
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: min(380px, calc(100vw - 2 * var(--sp-4)));
+  pointer-events: none;
+}
+:root[data-console="open"] .toast-host { --toast-bottom: calc(var(--console-h) + 2 * var(--gap-shell) + var(--sp-2)); }
+
+/* < 1280px the status panel is a drawer: the stack hugs the right edge, and steps left of the drawer while it is open. */
+@media (max-width: 1279px) {
+  .toast-host { --toast-right: calc(var(--gap-shell) + var(--sp-3)); }
+  .app[data-drawer="open"] ~ .toast-host {
+    --toast-right: calc(min(var(--status-w), 100vw - 2 * var(--gap-shell)) + 2 * var(--gap-shell) + var(--sp-3));
+  }
+}
+/* Phones: full width with a small margin, whatever the console is doing. */
+@media (max-width: 639px) {
+  .toast-host,
+  :root[data-console="open"] .toast-host,
+  .app[data-drawer="open"] ~ .toast-host {
+    --toast-bottom: var(--sp-3);
+    --toast-right: var(--sp-3);
+    left: var(--sp-3);
+    width: auto;
+  }
+}
+
+.toast {
+  --c: var(--tone-info);
+  --c-soft: var(--tone-info-soft);
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-2) var(--sp-3) var(--sp-4);
+  border: 1px solid color-mix(in srgb, var(--c) 38%, transparent);
+  border-radius: var(--card-radius);
+  corner-shape: var(--corner);
+  background: linear-gradient(90deg, var(--c-soft), transparent 72%), var(--night-3);
+  box-shadow: var(--shadow-pop), inset 3px 0 0 var(--c);
+  animation: ff-fade-up var(--dur-3) var(--ease) both;
+}
+.toast--neutral { --c: var(--tone-neutral); --c-soft: var(--tone-neutral-soft); }
+.toast--running { --c: var(--tone-running); --c-soft: var(--tone-running-soft); }
+.toast--success { --c: var(--tone-success); --c-soft: var(--tone-success-soft); }
+.toast--warning { --c: var(--tone-warning); --c-soft: var(--tone-warning-soft); }
+.toast--danger  { --c: var(--tone-danger); --c-soft: var(--tone-danger-soft); border-style: dashed; }
+.toast--paused  { --c: var(--tone-paused); --c-soft: var(--tone-paused-soft); }
+
+.toast__icon { margin-top: 2px; color: var(--c); }
+.toast__mark { margin-top: -1px; }
+.toast__body { min-width: 0; }
+.toast__title { font-size: var(--fs-md); font-weight: var(--fw-semibold); line-height: var(--lh-tight); color: var(--text); }
+.toast__text { margin-top: 2px; font-size: var(--fs-sm); color: var(--text-2); overflow-wrap: anywhere; }
+.toast__actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
+
+/* 任务完成: firefly-green glow edge and a tiny wing mark. */
+.toast--celebrate {
+  --c: var(--firefly);
+  --c-soft: var(--firefly-soft);
+  border-color: rgb(181 242 107 / 0.5);
+  box-shadow: var(--shadow-pop), inset 3px 0 0 var(--firefly), 0 0 26px -6px rgb(181 242 107 / 0.5);
+  animation: ff-fade-up var(--dur-3) var(--ease) both, toast-glint 1.8s ease-out 1;
+}
+@keyframes toast-glint {
+  0%   { box-shadow: var(--shadow-pop), inset 3px 0 0 var(--firefly), 0 0 0 0 rgb(181 242 107 / 0); }
+  35%  { box-shadow: var(--shadow-pop), inset 3px 0 0 var(--firefly), 0 0 40px -2px rgb(181 242 107 / 0.65); }
+  100% { box-shadow: var(--shadow-pop), inset 3px 0 0 var(--firefly), 0 0 26px -6px rgb(181 242 107 / 0.5); }
+}

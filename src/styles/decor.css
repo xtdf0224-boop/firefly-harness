@@ -1,0 +1,484 @@
+/* Decor: starfield canvas, 光翼 WingMark, 萤火聚合 ConvergenceBurst.
+   Colours come from tokens; translucent rgb() below is derived from --firefly (181 242 107),
+   --mint (95 227 200) and --text. Only transform / opacity / box-shadow / stroke-dashoffset animate. */
+
+/* ───────────── Starfield ───────────── */
+.starfield {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* ───────────── WingMark ───────────── */
+.wingmark { overflow: visible; flex: none; }
+
+.wingmark__edge {
+  stroke-width: var(--wm-sw, 1.4);
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.wingmark__rib {
+  fill: none;
+  stroke-width: calc(var(--wm-sw, 1.4) * 0.5);
+  stroke-linecap: round;
+  opacity: 0.42;
+}
+/* Silver highlight along the leading facet. */
+.wingmark__spine {
+  stroke: var(--silver);
+  stroke-width: calc(var(--wm-sw, 1.4) * 0.7);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.9;
+}
+/* Energy dash running the contour: outward along the spine, back down the feather edges.
+   A wide soft stroke under a narrow bright one reads as a travelling glow. */
+.wingmark__flow {
+  stroke: var(--text);
+  stroke-width: calc(var(--wm-sw, 1.4) * 1.3);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 10 90;
+  stroke-dashoffset: 0;
+  animation: wingmark-flow 5.6s linear infinite;
+}
+.wingmark__flow--glow {
+  stroke: var(--mint);
+  stroke-width: calc(var(--wm-sw, 1.4) * 4.5);
+  opacity: 0.32;
+}
+.wingmark__glint {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 0.5;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+.wingmark__core-dot { fill: var(--text); opacity: 0.95; }
+
+.wingmark--animated .wingmark__core {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: wingmark-core 3.6s ease-in-out infinite;
+}
+.wingmark--animated .wingmark__halo { animation: wingmark-halo 3.6s ease-in-out infinite; }
+
+@keyframes wingmark-flow { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
+@keyframes wingmark-core {
+  0%, 100% { transform: scale(0.92); opacity: 0.86; }
+  50%      { transform: scale(1.08); opacity: 1; }
+}
+@keyframes wingmark-halo {
+  0%, 100% { opacity: 0.7; }
+  50%      { opacity: 1; }
+}
+
+/* 萨姆: sharper joins, a hotter core. */
+:root[data-mode="sam"] .wingmark__edge,
+:root[data-mode="sam"] .wingmark__spine { stroke-linejoin: miter; stroke-miterlimit: 3; }
+:root[data-mode="sam"] .wingmark__rib { opacity: 0.55; }
+
+/* Reduced motion: no travelling light. The contour keeps a faint steady sheen and the core a steady glow. */
+:root[data-motion="reduced"] .wingmark__flow { animation: none; stroke-dasharray: none; opacity: 0.28; }
+:root[data-motion="reduced"] .wingmark__flow--glow { opacity: 0; }
+:root[data-motion="reduced"] .wingmark--animated .wingmark__core,
+:root[data-motion="reduced"] .wingmark--animated .wingmark__halo { animation: none; }
+
+/* ───────────── ConvergenceBurst ───────────── */
+.burst {
+  position: fixed;
+  inset: 0;
+  z-index: 55;                 /* above panels and toasts, below dialogs (60) */
+  overflow: hidden;
+  pointer-events: none;
+  contain: layout paint style;
+}
+.burst:empty { display: none; }
+
+.burst__dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  opacity: 0;
+  will-change: transform, opacity;
+  background: radial-gradient(circle,
+    rgb(244 255 214) 0 9%,
+    var(--firefly) 24%,
+    rgb(181 242 107 / 0.38) 46%,
+    rgb(181 242 107 / 0) 70%);
+}
+.burst__dot--mint {
+  background: radial-gradient(circle,
+    rgb(230 255 248) 0 9%,
+    var(--mint) 24%,
+    rgb(95 227 200 / 0.38) 46%,
+    rgb(95 227 200 / 0) 70%);
+}
+
+.burst__flash {
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0;
+  will-change: transform, opacity;
+  background: radial-gradient(circle,
+    rgb(244 255 214 / 0.9) 0,
+    rgb(181 242 107 / 0.55) 22%,
+    rgb(95 227 200 / 0.18) 52%,
+    rgb(95 227 200 / 0) 72%);
+}
+
+.burst__ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid var(--firefly);
+  box-shadow: 0 0 22px rgb(181 242 107 / 0.55), inset 0 0 14px rgb(95 227 200 / 0.4);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+/* Reduced motion: one still, soft ring around the target. */
+.burst__ring--static {
+  border-width: 1.5px;
+  border-radius: calc(var(--panel-radius) + 8px);
+  corner-shape: var(--corner);
+  opacity: 1;
+  will-change: auto;
+  box-shadow:
+    0 0 0 1px rgb(95 227 200 / 0.35),
+    0 0 26px -2px rgb(181 242 107 / 0.45),
+    inset 0 0 18px -4px rgb(181 242 107 / 0.3);
+}
+.burst__ring--static.burst__ring--round { border-radius: 50%; corner-shape: round; }
+
+/* 萨姆: the bloom ring is cut like armour plate instead of a perfect circle. */
+@supports (corner-shape: bevel) {
+  :root[data-mode="sam"] .burst__ring:not(.burst__ring--static) {
+    border-radius: 34%;
+    corner-shape: bevel;
+  }
+}
+
+:root[data-motion="reduced"] .burst__dot,
+:root[data-motion="reduced"] .burst__flash { display: none; }
+
+/* ───────────── Wallpaper ─────────────
+   Fixed behind everything (the starfield canvas paints over it, the .app grid over both).
+   Each layer carries its own look (image → tint → grade → 萨姆 scanlines) so a mode switch fades
+   the whole look at once; the edge shading on top is shared. */
+.wallpaper {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--night-1);
+}
+.wallpaper__layer {
+  position: absolute;
+  inset: 0;
+  isolation: isolate;               /* the tint's multiply blends with this layer's image only */
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 1.2s var(--ease), visibility 0s linear 1.2s;
+}
+.wallpaper__layer.is-active {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 1.2s var(--ease), visibility 0s;
+}
+.wallpaper__lqip {
+  position: absolute;
+  inset: -48px;
+  background-size: cover;
+  filter: blur(26px) saturate(1.1);
+  transform: scale(1.04);
+}
+.wallpaper__img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transform: scale(1.06);
+  transform-origin: 40% 38%;
+  transition: opacity 900ms var(--ease);
+  /* A slow camera drift, a few pixels a minute. Stepped (one tiny step every 0.5 s) so the compositor
+     and the glass panels above are not redrawn every frame for movement nobody can see. */
+  animation: wp-drift 140s steps(280, end) infinite alternate;
+  user-select: none;
+}
+.wallpaper__layer:not(.is-active) .wallpaper__img { animation-play-state: paused; }
+.wallpaper__layer.is-loaded .wallpaper__img { opacity: 1; }
+@keyframes wp-drift {
+  from { transform: scale(1.06) translate3d(-0.7%, -0.4%, 0); }
+  to   { transform: scale(1.09) translate3d(0.7%, 0.5%, 0); }
+}
+
+/* Per-wallpaper grading so each sits inside the night palette. The SAM art is bright and busy:
+   desaturate and darken it so the flames read as teal energy, not glare. */
+.wallpaper__layer--firefly .wallpaper__img { filter: saturate(1.08); }
+.wallpaper__layer--sam .wallpaper__img { filter: saturate(0.9) brightness(0.86) contrast(1.04); }
+.wallpaper__layer--sam .wallpaper__lqip { filter: blur(26px) saturate(0.9) brightness(0.86); }
+
+/* Cool night tint (流萤) / teal-charcoal tint (萨姆), multiplied so highlights stay luminous. */
+.wallpaper__tint {
+  position: absolute;
+  inset: 0;
+  mix-blend-mode: multiply;
+  background: linear-gradient(170deg, rgb(165 192 236), rgb(140 168 220) 55%, rgb(165 200 210));
+  opacity: 0.22;
+}
+.wallpaper__layer--sam .wallpaper__tint {
+  background: linear-gradient(170deg, rgb(160 210 200), rgb(135 165 172) 60%, rgb(125 145 155));
+  opacity: 0.3;
+}
+
+/* The night grade: its opacity is the inverse of 壁纸可见度 (set as --wp-dim by Wallpaper.tsx). */
+.wallpaper__grade {
+  position: absolute;
+  inset: 0;
+  background: #060a14;
+  opacity: var(--wp-dim, 0.55);
+  transition: opacity 700ms var(--ease);
+}
+.wallpaper__layer--sam .wallpaper__grade { background: #06080b; }
+/* 萨姆: fine scanlines across the art — armour HUD, not a photo. */
+.wallpaper__layer--sam::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, rgb(0 0 0 / 0.12) 0 1px, transparent 1px 3px);
+}
+
+/* Darker ground under the nav (left), status panel (right) and console (bottom), plus a soft
+   vignette. Kept light: the glass panels already dim what shows through them. */
+.wallpaper__edges {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgb(4 7 14 / 0.31) 0, rgb(4 7 14 / 0) calc(var(--nav-w) + 140px)),
+    linear-gradient(270deg, rgb(4 7 14 / 0.33) 0, rgb(4 7 14 / 0) calc(var(--status-w) + 140px)),
+    linear-gradient(0deg, rgb(4 7 14 / 0.3) 0, rgb(4 7 14 / 0) 180px),
+    radial-gradient(130% 120% at 45% 40%, transparent 60%, rgb(3 5 10 / 0.4) 100%);
+}
+
+:root[data-motion="reduced"] .wallpaper__layer,
+:root[data-motion="reduced"] .wallpaper__layer.is-active { transition: none; }
+:root[data-motion="reduced"] .wallpaper__img { animation: none !important; transform: scale(1.02); transition: none; }
+:root[data-motion="reduced"] .wallpaper__grade { transition: none; }
+
+/* ───────────── 开机动画 (Star Rail-style launch screen) ─────────────
+   .is-film  — the PV clip plays full screen
+   .is-title — the last frame holds and pushes in; logo, 「点击进入」 and the version line appear
+   .is-enter — a light sweep crosses, the splash fades and the workbench rises */
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  overflow: hidden;
+  background: #000;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.boot.is-enter { opacity: 0; transition: opacity 650ms var(--ease) 250ms; pointer-events: none; }
+
+.boot__film {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity 450ms var(--ease);
+}
+.boot.is-title .boot__film, .boot.is-enter .boot__film { opacity: 0; }
+
+.boot__hold { position: absolute; inset: 0; opacity: 0; transition: opacity 450ms var(--ease); }
+.boot__hold img { display: block; width: 100%; height: 100%; object-fit: cover; transform-origin: 50% 32%; }
+.boot.is-title .boot__hold, .boot.is-enter .boot__hold { opacity: 1; }
+.boot.is-title .boot__hold img, .boot.is-enter .boot__hold img { animation: boot-push 26s cubic-bezier(.2, .6, .3, 1) both; }
+@keyframes boot-push { from { transform: scale(1); } to { transform: scale(1.09); } }
+
+/* Shade for legibility: darker at the bottom (gate) and top-left (logo). */
+.boot__shade {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background:
+    linear-gradient(0deg, rgb(3 6 12 / 0.82) 0%, rgb(3 6 12 / 0.4) 22%, rgb(3 6 12 / 0) 42%),
+    radial-gradient(48% 40% at 0% 0%, rgb(3 6 12 / 0.82), rgb(3 6 12 / 0.45) 55%, transparent 80%);
+  transition: opacity 700ms var(--ease) 150ms;
+}
+.boot.is-title .boot__shade, .boot.is-enter .boot__shade { opacity: 1; }
+
+/* Fireflies rising over the held frame. */
+.boot__embers { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 900ms ease 300ms; }
+.boot.is-title .boot__embers { opacity: 1; }
+.boot__embers span {
+  position: absolute;
+  bottom: -12px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(240 255 210) 0 20%, rgb(181 242 107 / 0.85) 40%, rgb(181 242 107 / 0) 72%);
+  box-shadow: 0 0 10px rgb(181 242 107 / 0.6);
+  opacity: 0;
+  animation: boot-ember linear infinite;
+}
+.boot--sam .boot__embers span { background: radial-gradient(circle, rgb(225 255 248) 0 20%, rgb(95 227 200 / 0.85) 40%, rgb(95 227 200 / 0) 72%); box-shadow: 0 0 10px rgb(95 227 200 / 0.6); }
+@keyframes boot-ember {
+  0%   { opacity: 0; transform: translate(0, 0); }
+  12%  { opacity: 0.9; }
+  70%  { opacity: 0.7; }
+  100% { opacity: 0; transform: translate(var(--drift, 0), -105vh); }
+}
+
+/* Logo, top-left. */
+.boot__logo {
+  position: absolute;
+  top: clamp(20px, 5vh, 48px);
+  left: clamp(20px, 4vw, 56px);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 700ms var(--ease) 250ms, transform 700ms var(--ease) 250ms;
+  text-shadow: 0 1px 12px rgb(0 0 0 / 0.6);
+}
+.boot.is-title .boot__logo, .boot.is-enter .boot__logo { opacity: 1; transform: none; }
+.boot__logo-text { display: flex; flex-direction: column; line-height: 1.1; }
+.boot__name {
+  font-size: 34px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.2em;
+  color: #fff;
+  text-shadow: 0 0 2px rgb(0 0 0 / 0.9), 0 0 18px rgb(95 227 200 / 0.7), 0 2px 12px rgb(0 0 0 / 0.7);
+}
+.boot__sub { margin-top: 4px; font-size: var(--fs-sm); letter-spacing: 0.32em; color: #fff; text-shadow: 0 0 2px rgb(0 0 0 / 0.95), 0 1px 10px rgb(0 0 0 / 0.8); }
+.boot--sam .boot__sub { font-family: var(--font-mono); text-transform: uppercase; }
+
+/* 「点击进入」 gate, bottom centre. */
+.boot__gate {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(64px, 13vh, 132px);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  transform: translate(-50%, 10px);
+  opacity: 0;
+  transition: opacity 700ms var(--ease) 600ms, transform 700ms var(--ease) 600ms;
+}
+.boot.is-title .boot__gate { opacity: 1; transform: translate(-50%, 0); }
+.boot__gate-line { width: clamp(60px, 12vw, 160px); height: 1px; background: linear-gradient(90deg, transparent, rgb(230 238 242 / 0.7)); }
+.boot__gate-line:last-child { background: linear-gradient(270deg, transparent, rgb(230 238 242 / 0.7)); }
+.boot__enter {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 18px;
+  font-size: 18px;
+  letter-spacing: 0.42em;
+  color: #fff;
+  text-shadow: 0 0 12px rgb(95 227 200 / 0.8), 0 1px 10px rgb(0 0 0 / 0.7);
+  border-radius: 999px;
+  animation: boot-breathe 2.6s ease-in-out infinite;
+}
+.boot__enter:focus-visible { outline: 2px solid var(--mint); outline-offset: 4px; }
+.boot__enter-deco { font-size: 8px; color: var(--firefly); letter-spacing: 0; }
+@keyframes boot-breathe { 0%, 100% { opacity: 0.75; } 50% { opacity: 1; } }
+.boot--sam .boot__enter { font-family: var(--font-mono); letter-spacing: 0.5em; }
+
+.boot__meta {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(28px, 5vh, 56px);
+  display: flex;
+  gap: 10px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  text-shadow: 0 0 2px rgb(0 0 0 / 0.95), 0 1px 8px rgb(0 0 0 / 0.8);
+  opacity: 0;
+  transition: opacity 700ms var(--ease) 800ms;
+}
+.boot.is-title .boot__meta { opacity: 1; }
+.boot__credit {
+  position: absolute;
+  left: 16px;
+  bottom: 12px;
+  font-size: var(--fs-2xs);
+  color: rgb(230 238 242 / 0.72);
+  text-shadow: 0 0 2px rgb(0 0 0 / 0.95), 0 1px 6px rgb(0 0 0 / 0.8);
+}
+
+.boot__skip {
+  position: absolute;
+  right: 24px;
+  bottom: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  background: rgb(0 0 0 / 0.35);
+  border: 1px solid rgb(230 238 242 / 0.25);
+  backdrop-filter: blur(6px);
+}
+.boot__skip:hover, .boot__skip:focus-visible { border-color: var(--mint-line); }
+
+/* 萨姆: a HUD scan line keeps sweeping the held frame. */
+.boot__scan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--mint) 30%, var(--mint-strong) 50%, var(--mint) 70%, transparent);
+  box-shadow: 0 0 18px rgb(95 227 200 / 0.7);
+  opacity: 0;
+}
+.boot.is-title .boot__scan { animation: boot-scan 3.6s cubic-bezier(.6, 0, .3, 1) 0.4s infinite; }
+@keyframes boot-scan { 0% { opacity: 0; transform: translateY(0); } 8% { opacity: 0.8; } 85% { opacity: 0.6; } 100% { opacity: 0; transform: translateY(100vh); } }
+
+/* 进入: a band of light crosses the screen. */
+.boot__sweep {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -40%;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.0) 10%, rgb(200 255 240 / 0.55) 50%, rgb(255 255 255 / 0) 90%, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+.boot.is-enter .boot__sweep { animation: boot-sweep 750ms cubic-bezier(.5, 0, .3, 1) both; }
+@keyframes boot-sweep { 0% { opacity: 1; transform: translateX(0); } 100% { opacity: 1; transform: translateX(350%); } }
+
+/* The workbench floats up as the splash leaves (transform only — keeps the glass working). */
+:root[data-boot="leaving"] .app { animation: boot-app-in 800ms var(--ease) 150ms; }
+@keyframes boot-app-in { from { transform: translateY(16px) scale(0.985); } to { transform: none; } }
+
+@media (max-width: 639px) {
+  .boot__name { font-size: 26px; }
+  .boot__meta { flex-wrap: wrap; justify-content: center; white-space: normal; width: 90vw; text-align: center; }
+  .boot__credit { right: 16px; text-align: center; }
+}
+/* Reduced motion: a still title screen — no clip, no push, no embers, no sweep. */
+:root[data-motion="reduced"] .boot__embers,
+:root[data-motion="reduced"] .boot__scan,
+:root[data-motion="reduced"] .boot__sweep { display: none; }
+
+/* While the opaque boot screen is up, the workbench, wallpaper and starfield are not painted at all,
+   so the clip gets the whole GPU (no glass blurs or particles recomputing underneath). */
+:root[data-boot="on"] :is(.app, .wallpaper, .starfield) { visibility: hidden; }

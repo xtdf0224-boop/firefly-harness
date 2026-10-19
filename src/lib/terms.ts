@@ -1,0 +1,90 @@
+/* 免责声明与使用条款 — one source for Settings › 免责声明与使用条款. The same text is mirrored in
+   README.md, DISCLAIMER.md and the installer's licence page (build/license.txt); keep them in step. */
+
+export const REPO_URL = 'https://github.com/xtdf0224-boop/firefly-harness';
+export const ISSUES_URL = `${REPO_URL}/issues`;
+
+export interface TermsSection {
+  title: string;
+  paragraphs: string[];
+  /** Optional list rendered under the paragraphs. */
+  items?: Array<{ text: string; href?: string }>;
+}
+
+export const TERMS: TermsSection[] = [
+  {
+    title: '1. 项目性质与版权声明',
+    paragraphs: [
+      '「萤火 · Agent 工作台」是个人粉丝非商用同人项目，界面主题取材于米哈游（miHoYo / HoYoverse）旗下游戏《崩坏：星穹铁道》中的角色「流萤」与「萨姆」。',
+      '《崩坏：星穹铁道》、角色名称、世界观、原画、官方影像、官方文案等全部知识产权及著作权归属米哈游 / HoYoverse。本项目没有官方授权，不是官方软件，与米哈游 / HoYoverse 不存在任何合作、背书或赞助关系。',
+    ],
+  },
+  {
+    title: '2. 第三方素材',
+    paragraphs: [
+      '本软件包含以下第三方素材，它们不在本项目 MIT 许可证的授权范围内，版权归各自的权利人所有：',
+    ],
+    items: [
+      { text: '流萤模式背景壁纸「星空下飞行的流萤」：pixiv 作品 119791514（经 wallhaven 获取），版权归原画师所有。', href: 'https://www.pixiv.net/artworks/119791514' },
+      { text: '萨姆模式背景壁纸「青焰中的流萤」：pixiv 作品 120107524（经 wallhaven 获取），版权归原画师所有。', href: 'https://www.pixiv.net/artworks/120107524' },
+      { text: '开机动画短片与标题画面：裁剪自官方《流萤角色PV——「壳中萤火」》，版权归米哈游 / HoYoverse 所有。', href: 'https://www.bilibili.com/video/BV1jE421A7qK/' },
+    ],
+  },
+  {
+    title: '3. 使用范围与禁止行为',
+    paragraphs: [
+      '本软件仅限个人本地非商业使用。严禁任何商业行为，包括但不限于售卖程序、直播盈利、付费社群运营、捆绑销售、含广告变现，以及对外谎称本程序为官方产品。',
+      '禁止将本软件中的第三方素材（壁纸、开屏短片、标题画面等）单独提取后再分发、出售或用于其他项目。',
+    ],
+  },
+  {
+    title: '4. 演示模式与模拟数据',
+    paragraphs: [
+      '当前版本没有连接任何真实的 AI 模型或执行后端。界面中的 Agent 回复、计划、工具调用、终端输出、产物、Token 统计与连接状态，全部由内置模拟器生成，并在界面上标注为「模拟」或「示例数据」。',
+      '这些内容仅用于演示界面与交互流程，不代表任何真实执行结果，请勿将其作为任何决策依据。',
+    ],
+  },
+  {
+    title: '5. 用户责任',
+    paragraphs: [
+      '使用本软件产生的一切后果由使用者自行承担。如您自行接入真实的模型或执行后端，Agent 执行的写文件、运行命令等操作须由您确认并负责。',
+      '不得使用本软件发布违法、低俗、造谣、恶意抹黑原作 IP 或违背公序良俗的内容；违规后果由用户自行承担，开发者不承担任何连带责任。',
+    ],
+  },
+  {
+    title: '6. 无担保声明',
+    paragraphs: [
+      '本项目为实验性开源项目，不保障程序的稳定性。因程序漏洞、硬件故障、本地数据丢失等产生的任何损失，开发者不予赔付。',
+      '本软件按「原样」提供，不附带任何明示或默示的担保。',
+    ],
+  },
+  {
+    title: '7. 版权方联络通道',
+    paragraphs: [
+      '若米哈游 / HoYoverse、画师或其他权利方认为本软件存在侵犯权益的情形，请在 GitHub Issues 中提交（标题注明【版权事宜】）。作者承诺在收到通知后 7 个工作日内积极配合处理或下架相关内容。',
+    ],
+    items: [{ text: 'GitHub Issues：xtdf0224-boop/firefly-harness', href: ISSUES_URL }],
+  },
+  {
+    title: '8. 反馈与 Bug 提交',
+    paragraphs: [
+      '如遇到问题、Bug 或有功能建议，欢迎在 GitHub Issues 中提交（标题建议带【反馈】或【Bug】）。普通反馈会尽力查看，但不保证及时回复；版权事宜享有最高响应优先级。',
+    ],
+  },
+  {
+    title: '9. 致谢',
+    paragraphs: [
+      '感谢 pixiv 作品 119791514 与 120107524 的画师创作的精美同人作品，感谢米哈游 / HoYoverse 创造了流萤与萨姆。',
+      '本项目使用了 React、Vite、TypeScript、immer、lucide-react 与 Electron 等开源软件，感谢它们的作者与社区。',
+    ],
+  },
+  {
+    title: '10. 协议效力',
+    paragraphs: ['安装或使用本软件即视为您已阅读、理解并同意本免责声明与使用条款的全部内容。'],
+  },
+];
+
+/** Plain-text rendering (installer licence page, DISCLAIMER.md body). */
+export function termsAsText() {
+  return TERMS.map((s) => [s.title, ...s.paragraphs, ...(s.items ?? []).map((i) => `  - ${i.text}${i.href ? ` ${i.href}` : ''}`)].join('\n')).join('\n\n');
+}
