@@ -1,18 +1,17 @@
 /* "当前目标": the task's goal (clamped to 3 lines with a toggle), plus when it was created, who
-   works on it and which template it came from. */
+   works on it and which model runs it. */
 import { ChevronDown } from 'lucide-react';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { relative } from '../../lib/format';
 import { useNow } from '../../lib/hooks';
 import type { Agent } from '../../lib/types';
 import { shallow, useApp } from '../../state/store';
-import { TEMPLATES } from '../../state/scenarios';
 import { AgentAvatar, cx } from '../ui';
 
 export function GoalCard({ taskId }: { taskId: string }) {
   const task = useApp((s) => {
     const t = s.tasks[taskId];
-    return t ? { goal: t.goal, createdAt: t.createdAt, scenarioId: t.scenarioId, agentIds: t.agentIds, engine: t.engine?.label, cwd: t.engine?.cwd, access: t.engine?.access } : undefined;
+    return t ? { goal: t.goal, createdAt: t.createdAt, agentIds: t.agentIds, engine: t.engine?.label, cwd: t.engine?.cwd, access: t.engine?.access } : undefined;
   }, shallow);
   const agents = useApp((s) => s.agents);
   const now = useNow(30_000);
@@ -36,7 +35,6 @@ export function GoalCard({ taskId }: { taskId: string }) {
   if (!task) return null;
   const members = task.agentIds.map((id) => agents.find((a) => a.id === id)).filter((a): a is Agent => !!a);
   const names = members.map((a) => a.name).join('、');
-  const scenario = task.scenarioId === 'general' ? '自定义目标' : (TEMPLATES.find((t) => t.id === task.scenarioId)?.name ?? '自定义目标');
 
   return (
     <section className="panel ws-goal" aria-label="当前目标">
@@ -50,9 +48,7 @@ export function GoalCard({ taskId }: { taskId: string }) {
             </span>
             <span>{members.length} 个 Agent<span className="sr-only">：{names}</span></span>
           </li>
-          {task.engine
-            ? <li className="ws-goal__engine" title={task.cwd ? `工作文件夹：${task.cwd}` : undefined}>{task.engine}{task.access === 'read' ? ' · 只读' : ''}</li>
-            : <li>{task.scenarioId === 'general' ? '演示模式' : `示例：${scenario}`}</li>}
+          {task.engine && <li className="ws-goal__engine" title={task.cwd ? `工作文件夹：${task.cwd}` : undefined}>{task.engine}{task.access === 'read' ? ' · 只读' : ''}</li>}
         </ul>
       </div>
       <p id={textId} ref={textRef} className={cx('ws-goal__text', !expanded && 'is-clamped')}>{goal}</p>

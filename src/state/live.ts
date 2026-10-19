@@ -1,25 +1,27 @@
-/* 真实运行 / LIVE RUNS. Drives connected models through the desktop bridge and writes what happens
-   into the store with the same shapes the simulator uses (Run, PlanStep, ToolCall, Approval…), marked
-   `source: 'live'` / `simulated: false`.
+/* 运行 / RUNS. Drives the connected models through the desktop bridge and writes what happens into
+   the store (Run, PlanStep, ToolCall, Approval…).
 
    工作任务: plan turn (the model answers in its own voice, then a JSON plan) → one turn per step →
    a summary turn. API models only reason and write; CLI agents work in the task's folder with their
-   own tools, and permission prompts become the workbench's 待确认操作.
+   own tools, and permission prompts become the workbench's 待确认操作. A step goes to the agent the
+   plan names; an agent with its own model (Agent page) runs its steps on that model — an API model
+   from the shared history, a CLI agent in the task's folder with its own session and tool list.
    闲聊任务: one reply per message, in 流萤's or 萨姆's voice. */
 import type { Draft } from 'immer';
 import { openStream, desktop, type StartSpec, type StreamEvent } from '../lib/desktop';
 import { effortRequest } from '../lib/effort';
 import { json } from '../lib/format';
 import {
-  GREET_PROMPT, NUDGE_PROMPT, PERSONA, completionLine, demoChatReply, demoNudge, eventLine, greeting, mood, rolePrompt, systemPrompt, type PromptPurpose,
+  GREET_PROMPT, NUDGE_PROMPT, PERSONA, completionLine, eventLine, mood, rolePrompt, systemPrompt, type PromptPurpose,
 } from '../lib/persona';
 import {
   CLAUDE_HEADLESS_DENY, CLAUDE_TOOLS, DRIVERS, PROVIDER_BY_ID, apiBaseUrl, contextOf, regionOf, toolCategory,
 } from '../lib/providers';
 import type {
-  AgentId, AppState, Approval, Message, PlanStep, Run, Task, TaskEngine, ToolCall, ToolId, VisualMode,
+  Agent, AgentId, AppState, Approval, Message, PlanStep, Run, Task, TaskEngine, ToolCall, ToolId, VisualMode,
 } from '../lib/types';
 import { announce, dropToasts, pushEvent, toast, touch } from './engine';
+import { agentEngine } from './models';
 import { skillsPrompt, taskSkills } from './skills';
 import { store, uid } from './store';
 
@@ -151,8 +153,8 @@ const READ_ONLY_BLOCK = new Set<ToolId>(['write_file', 'shell', 'git', 'browser_
     --allowedTools makes a read anywhere else come back as a permission request. */
 const CLAUDE_READS = new Set(['Read', 'NotebookRead', 'Grep', 'Glob', 'LS']);
 
-/** Tool policy → Claude Code allow / deny lists, or Codex sandbox. */
-function policySpec(spec: StartSpec, engine: TaskEngine, access: 'chat' | 'work') {
+/** Tool policy → Claude Code allow / deny lists, or Codex sandbox. `only`: an agent's own tool list. */
+function policySpec(spec: StartSpec, engine: TaskEngine, access: 'chat' | 'work', only?: ToolId[]) {
   spec.access = access;
   const readOnly = engine.access === 'read';
   spec.readOnly = readOnly;
@@ -162,16 +164,16 @@ function policySpec(spec: StartSpec, engine: TaskEngine, access: 'chat' | 'work'
   const deny = new Set<string>(CLAUDE_HEADLESS_DENY);
   for (const t of tools) {
     const names = CLAUDE_TOOLS[t.id] ?? [];
-    const blocked = t.permission === 'off' || (readOnly && READ_ONLY_BLOCK.has(t.id));
+    const blocked = t.permission === 'off' || (readOnly && READ_ONLY_BLOCK.has(t.id)) || (!!only && t.id !== 'other' && !only.includes(t.id));
     if (blocked) names.forEach((n) => deny.add(n));
     else if (t.permission === 'auto') names.filter((n) => !CLAUDE_READS.has(n)).forEach((n) => allow.add(n));
   }
   spec.allow = [...allow];
   spec.deny = [...deny];
-  const writeOff = tools.find((t) => t.id === 'write_file')?.permission === 'off';
+  const writeOff = tools.find((t) => t.id === 'write_file')?.permission === 'off' || (!!only && !only.includes('write_file'));
   const cfg = s().models.providers[engine.provider];
   spec.sandbox = readOnly || writeOff ? 'read-only' : cfg.codexSandbox === 'danger-full-access' ? 'danger-full-access' : 'workspace-write';
-  spec.webSearch = tools.find((t) => t.id === 'web_search')?.permission !== 'off';
+  spec.webSearch = tools.find((t) => t.id === 'web_search')?.permission !== 'off' && (!only || only.includes('web_search'));
   return spec;
 }
 
@@ -193,11 +195,16 @@ interface Sink {
   timer?: number;
   /** Create the bubble right away (typing dots) instead of on the first text. */
   eager?: boolean;
+  /** A chat reply stays one bubble: tool use and turn breaks continue it instead of closing it. */
+  single?: boolean;
+  /** What she is doing right now (shown under a chat bubble while a tool runs). */
+  activity?: string;
 }
 
 function sinkFlush(k: Sink, final = false, keepThink = false) {
   if (k.timer !== undefined) { window.clearTimeout(k.timer); k.timer = undefined; }
-  const text = (k.view ? k.view(k.raw) : k.raw).replace(/^\s+/, '');
+  // 「写完再显示」: nothing of the text shows until it is final (the bubble keeps its typing dots).
+  const text = !final && settings().typing === 'instant' ? '' : (k.view ? k.view(k.raw) : k.raw).replace(/^\s+/, '');
   const think = k.think.trim() ? k.think : undefined;
   store.update((d) => {
     const task = d.tasks[k.taskId];
@@ -207,13 +214,14 @@ function sinkFlush(k: Sink, final = false, keepThink = false) {
       if (!text && !think && !(k.eager && !final)) return;
       if (final && !text.trim() && !(keepThink && think)) return;
       k.msgId = uid('msg');
-      task.messages.push({ id: k.msgId, role: 'agent', agentId: k.agentId, runId: k.runId, kind: k.kind, text, at: now(), simulated: false, live: true, streaming: !final, persona: k.persona, thinking: think });
+      task.messages.push({ id: k.msgId, role: 'agent', agentId: k.agentId, runId: k.runId, kind: k.kind, text, at: now(), streaming: !final, persona: k.persona, thinking: think, activity: final ? undefined : k.activity });
       touch(d, k.taskId, now());
       return;
     }
     if (final && !text.trim() && !(keepThink && think)) { task.messages = task.messages.filter((x) => x.id !== m!.id); return; }
     m.text = final ? text.trimEnd() : text;
     m.streaming = !final;
+    m.activity = final ? undefined : k.activity;
     if (think) m.thinking = think;
   });
 }
@@ -221,12 +229,21 @@ function sinkFlush(k: Sink, final = false, keepThink = false) {
 function sinkText(k: Sink, delta: string) {
   k.raw += delta;
   k.all += delta;
+  // 打字节奏「一次显示」: keep the typing dots until the reply (or this bubble) is complete.
+  if (settings().typing === 'instant') return;
   if (k.timer === undefined) k.timer = window.setTimeout(() => { k.timer = undefined; sinkFlush(k); }, 70);
 }
 
 function sinkThink(k: Sink, delta: string) {
   k.think += delta;
   if (k.timer === undefined) k.timer = window.setTimeout(() => { k.timer = undefined; sinkFlush(k); }, 120);
+}
+
+/** A pause in one chat reply (a tool, a new model turn): start a new paragraph, keep the bubble open. */
+function sinkPause(k: Sink, activity?: string) {
+  if (k.raw.trim() && !k.raw.endsWith('\n\n')) { k.raw += k.raw.endsWith('\n') ? '\n' : '\n\n'; k.all += '\n\n'; }
+  k.activity = activity;
+  if (k.msgId || activity) sinkFlush(k);
 }
 
 /** Close the current bubble; the next text starts a new one. */
@@ -252,9 +269,23 @@ interface TurnOpts {
   eager?: boolean;
   /** A chat reply: tracked in chatBusy so a second message waits for it. */
   chat?: boolean;
+  /** A CLI turn of an agent on its own model: its session id goes to task.agentSessions[agent]. */
+  sessionAgent?: AgentId;
+  /** Tool categories this agent may use (its Agent-page list); others are refused. */
+  onlyTools?: ToolId[];
 }
 
 interface TurnResult { text: string; stopReason?: string; plan?: Array<{ text: string; status: string }> }
+
+/** 「正在查看：README.md」 — what a tool call looks like from the outside, for the chat bubble. */
+function activityText(name: string, input: Record<string, unknown>, title: string) {
+  const verb: Record<ToolId, string> = {
+    read_file: '正在查看', code_search: '正在搜索', write_file: '正在写入', shell: '正在运行命令', git: '正在运行 Git',
+    web_search: '正在搜索网页', web_fetch: '正在打开网页', browser_read: '正在看网页', browser_act: '正在操作网页', other: '正在使用工具',
+  };
+  const what = (title || name).replace(/\s+/g, ' ').trim().slice(0, 80);
+  return `${verb[toolCategory(name, input)]}：${what}`;
+}
 
 function preview(category: ToolId, name: string, input: Record<string, unknown>): { text: string; kind: Approval['previewKind'] } {
   const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '');
@@ -272,7 +303,7 @@ function preview(category: ToolId, name: string, input: Record<string, unknown>)
 }
 
 function runTurn(o: TurnOpts): Promise<TurnResult> {
-  const k: Sink = { taskId: o.task.id, runId: o.runId, agentId: o.agentId, kind: o.kind, persona: o.agentId === 'orchestrator' ? voice() : undefined, view: o.view, raw: '', all: '', think: '', eager: o.eager };
+  const k: Sink = { taskId: o.task.id, runId: o.runId, agentId: o.agentId, kind: o.kind, persona: o.agentId === 'orchestrator' ? voice() : undefined, view: o.view, raw: '', all: '', think: '', eager: o.eager, single: o.chat };
   const calls = new Map<string, string>(); // CLI call id → our ToolCall id
   let plan: TurnResult['plan'];
   let myId = '';
@@ -293,7 +324,7 @@ function runTurn(o: TurnOpts): Promise<TurnResult> {
       const category = toolCategory(name, input);
       const call: ToolCall = {
         id: uid('call'), runId: run.id, stepId: o.stepId ?? '', agentId: o.agentId, tool: category, toolName: name,
-        title: title || name, input, status: 'running', startedAt: now(), simulated: false,
+        title: title || name, input, status: 'running', startedAt: now(),
       };
       run.toolCalls.push(call);
       if (cliId) calls.set(cliId, call.id);
@@ -308,7 +339,12 @@ function runTurn(o: TurnOpts): Promise<TurnResult> {
     const on = (ev: StreamEvent) => {
       switch (ev.type) {
         case 'session':
-          store.update((d) => { const t = d.tasks[o.task.id]; if (t) t.session = ev.sessionId; });
+          store.update((d) => {
+            const t = d.tasks[o.task.id];
+            if (!t) return;
+            if (o.sessionAgent) t.agentSessions = { ...t.agentSessions, [o.sessionAgent]: ev.sessionId };
+            else t.session = ev.sessionId;
+          });
           break;
         case 'text':
           sinkText(k, ev.text);
@@ -318,16 +354,19 @@ function runTurn(o: TurnOpts): Promise<TurnResult> {
           if (!o.chat) withRun((_d, run) => { if (run.live && run.live.activity !== 'thinking') run.live = { agentId: o.agentId, activity: 'thinking', text: '思考中…' }; });
           break;
         case 'text-break':
-          sinkBreak(k);
+          if (k.single) sinkPause(k, k.activity);
+          else sinkBreak(k);
           break;
         case 'tool':
-          sinkBreak(k);
+          if (k.single) sinkPause(k, activityText(ev.name, ev.input, ev.title));
+          else sinkBreak(k);
           withRun((d, run) => {
             const call = ensureCall(d, run, ev.callId, ev.name, ev.input, ev.title);
             if (call && run.status === 'running') run.live = { agentId: o.agentId, activity: 'tool', text: call.title };
           });
           break;
         case 'tool-end':
+          if (k.single && k.activity) { k.activity = undefined; sinkFlush(k); }
           withRun((d, run) => {
             const id = calls.get(ev.callId);
             const call = id ? run.toolCalls.find((c) => c.id === id) : undefined;
@@ -394,7 +433,7 @@ function runTurn(o: TurnOpts): Promise<TurnResult> {
           release();
           if (cut) {
             store.update((d) => {
-              d.tasks[o.task.id]?.messages.push({ id: uid('msg'), role: 'system', runId: o.runId, at: now(), simulated: false,
+              d.tasks[o.task.id]?.messages.push({ id: uid('msg'), role: 'system', runId: o.runId, at: now(),
                 text: '这次回复达到了输出长度上限，后面的内容被截断了。可以让它「继续」，或把强度调低一些。' });
               if (o.runId) { const run = d.runs[o.runId]; if (run) pushEvent(d, { runId: run.id, kind: 'agent', level: 'warn', text: '模型回复达到输出上限，被截断' }); }
             });
@@ -436,13 +475,15 @@ function onPermission(o: TurnOpts, ev: Extract<StreamEvent, { type: 'permission'
   const st = s();
   const def = st.tools.find((t) => t.id === category);
   const readOnly = o.task.engine?.access === 'read' && READ_ONLY_BLOCK.has(category);
-  if (readOnly || def?.permission === 'off') {
+  const notMine = !!o.onlyTools && category !== 'other' && !o.onlyTools.includes(category);
+  if (readOnly || notMine || def?.permission === 'off') {
     answer('deny');
     store.update((d) => {
       const run = d.runs[o.runId!];
       if (!run) return;
       const call = ensureCall(d, run);
-      if (call) Object.assign(call, { status: 'denied', endedAt: now(), durationMs: 0, output: readOnly ? '这个任务是只读的，已自动拒绝。' : `「${def?.name}」已在「工具与连接」中禁用，已自动拒绝。` });
+      if (call) Object.assign(call, { status: 'denied', endedAt: now(), durationMs: 0,
+        output: readOnly ? '这个任务是只读的，已自动拒绝。' : notMine ? `${agentName(d, o.agentId)} 没有「${def?.name ?? category}」这个工具（在 Agent 页可以调整），已自动拒绝。` : `「${def?.name}」已在「工具与技能」中禁用，已自动拒绝。` });
       pushEvent(d, { runId: run.id, kind: 'approval', level: 'warn', text: `已自动拒绝：${ev.title || ev.name}` });
     });
     return;
@@ -463,7 +504,7 @@ function onPermission(o: TurnOpts, ev: Extract<StreamEvent, { type: 'permission'
       tool: category, title: `${def?.name ?? ev.name}：${ev.title || ev.name}`.slice(0, 120),
       reason: outside
         ? `这次要访问工作文件夹以外的位置：${outside}。自动放行只适用于工作文件夹以内，请确认。`
-        : ev.reason ? String(ev.reason) : `${task.engine?.label ?? '模型'} 想要${def?.name ?? `使用 ${ev.name}`}，需要你的确认。`,
+        : ev.reason ? String(ev.reason) : `${(o.runId ? d.runs[o.runId]?.agentEngines?.[o.agentId] : undefined)?.label ?? task.engine?.label ?? '模型'} 想要${def?.name ?? `使用 ${ev.name}`}，需要你的确认。`,
       preview: pv.text, previewKind: pv.kind, risk: def?.risk ?? 'medium', status: 'pending', createdAt: now(),
     };
     approvalId = approval.id;
@@ -514,13 +555,16 @@ function markDelivered(taskId: string, runId: string) {
   store.update((d) => { for (const m of d.tasks[taskId]?.messages ?? []) if (m.role === 'user' && m.runId === runId) m.delivered = true; });
 }
 
-function planPrompt(task: Task, cli: boolean) {
+function planPrompt(task: Task, run: Run | undefined, cli: boolean) {
   const st = s();
-  const roster = cli
-    ? '- orchestrator：你自己（这次由你一个人在工作文件夹里完成全部步骤）'
-    : task.agentIds.map((id) => {
+  const ids = rosterOf(task);
+  const roster = ids.length <= 1
+    ? `- orchestrator：你自己（这次由你一个人${cli ? '在工作文件夹里' : ''}完成全部步骤）`
+    : ids.map((id) => {
       const a = st.agents.find((x) => x.id === id);
-      return `- ${id}：${a?.name ?? id}，${a?.role ?? ''}`;
+      const own = run?.agentEngines?.[id];
+      const how = id === 'orchestrator' ? '你自己' : own ? `用 ${own.label}${own.auth === 'cli' ? '，能在工作文件夹里动手' : '，只能思考和写作，不能动文件'}` : cli ? '由你以这个角色完成' : '';
+      return `- ${id}：${a?.name ?? id}，${a?.role ?? ''}${how ? `（${how}）` : ''}`;
     }).join('\n');
   const extras = task.messages.filter((m) => m.role === 'user' && m.text !== task.goal).map((m) => `- ${m.text}`).join('\n');
   return [
@@ -553,7 +597,7 @@ function parsePlan(raw: string, allowed: AgentId[]): Array<{ title: string; deta
 
 /** API runs keep no hidden state: the conversation is rebuilt from the plan and step results. */
 function apiHistory(task: Task, run: Run) {
-  const msgs: Array<{ role: 'user' | 'assistant'; content: string }> = [{ role: 'user', content: planPrompt(task, false) }];
+  const msgs: Array<{ role: 'user' | 'assistant'; content: string }> = [{ role: 'user', content: planPrompt(task, run, false) }];
   if (run.planReady) {
     msgs.push({ role: 'assistant', content: `计划：\n${run.plan.map((st, i) => `${i + 1}. ${st.title}（${st.agentId}）：${st.detail}`).join('\n')}` });
     run.plan.forEach((st, i) => {
@@ -567,7 +611,8 @@ function apiHistory(task: Task, run: Run) {
 
 function stepPrompt(run: Run, i: number, extras: string[], cli: boolean) {
   const st = run.plan[i];
-  const who = st.agentId !== 'orchestrator' ? `这一步由「${agentName(s(), st.agentId)}」负责。` : '';
+  const a = s().agents.find((x) => x.id === st.agentId);
+  const who = st.agentId !== 'orchestrator' ? `这一步由「${a?.name ?? st.agentId}」（${a?.role ?? ''}）负责${cli ? '，请以这个角色来做' : ''}。` : '';
   return [
     `现在执行第 ${i + 1}/${run.plan.length} 步「${st.title}」：${st.detail}`,
     who,
@@ -577,8 +622,7 @@ function stepPrompt(run: Run, i: number, extras: string[], cli: boolean) {
   ].filter(Boolean).join('\n\n');
 }
 
-function specFor(task: Task, run: Run, purpose: PromptPurpose, agent: AgentId, prompt: string, access: 'chat' | 'work'): Result<StartSpec> {
-  const engine = task.engine!;
+function specFor(task: Task, run: Run, purpose: PromptPurpose, agent: AgentId, prompt: string, access: 'chat' | 'work', engine: TaskEngine = task.engine!): Result<StartSpec> {
   const b = baseSpec(engine);
   if (!b.ok) return b;
   const spec = b.value;
@@ -590,13 +634,67 @@ function specFor(task: Task, run: Run, purpose: PromptPurpose, agent: AgentId, p
     spec.messages = [...apiHistory(task, run), { role: 'user', content: prompt }];
     return ok(spec);
   }
-  const useBrowser = browserOn(engine) && access === 'work';
-  spec.system = withSkills(systemPrompt(purpose === 'plan' || purpose === 'step' ? 'cli' : purpose, promptContext(task, 'cli')), skillText) + (useBrowser ? BROWSER_NOTE : '');
+  const own = toolsOf(agent);
+  const useBrowser = browserOn(engine) && access === 'work' && (!own || own.includes('browser_read') || own.includes('browser_act'));
+  const role = agent !== 'orchestrator' ? `\n\n${rolePrompt(agent, callName())}` : '';
+  spec.system = withSkills(systemPrompt(purpose === 'plan' || purpose === 'step' ? 'cli' : purpose, promptContext(task, 'cli')) + role, skillText) + (useBrowser ? BROWSER_NOTE : '');
   spec.skills = !!skillText && !inline;
   spec.browser = useBrowser;
   spec.prompt = prompt;
-  spec.sessionId = task.session;
-  return ok(policySpec(spec, engine, access));
+  spec.sessionId = engine === task.engine ? task.session : task.agentSessions?.[agent];
+  return ok(policySpec(spec, engine, access, toolsOf(agent)));
+}
+
+/** Agents taking part in a task's runs (the 编排 Agent always does). */
+function rosterOf(task: Task): AgentId[] {
+  const ids = task.agentIds.filter((id) => s().agents.some((a) => a.id === id && (a.enabled || id === 'orchestrator')));
+  return ids.includes('orchestrator') ? ids : ['orchestrator', ...ids];
+}
+
+/** A sub-agent's tool list (Agent page); the 编排 Agent follows the 工具策略 alone. */
+const toolsOf = (agent: AgentId): ToolId[] | undefined => {
+  const a: Agent | undefined = s().agents.find((x) => x.id === agent);
+  return agent === 'orchestrator' || !a ? undefined : a.tools;
+};
+
+/** The CLI session a turn runs in: 'task' (the task's own), an agent id (its own CLI model), or '' for API turns. */
+function sessionKey(run: Run, agent: AgentId, engine: TaskEngine): string {
+  if (isApi(engine)) return '';
+  return agent !== 'orchestrator' && run.agentEngines?.[agent] ? agent : 'task';
+}
+
+/** The session a done step's result lives in (the same keys as sessionKey; API results live in none). */
+function producer(run: Run, st: PlanStep): string {
+  const own = st.agentId !== 'orchestrator' ? run.agentEngines?.[st.agentId] : undefined;
+  if (own) return own.auth === 'cli' ? st.agentId : '';
+  return s().tasks[run.taskId]?.engine?.auth === 'cli' ? 'task' : '';
+}
+
+/** Results of done steps this session neither produced nor was told about yet. */
+function unseen(run: Run, key: string) {
+  const told = new Set(run.shown?.[key] ?? []);
+  const news = run.plan.filter((st) => st.status === 'done' && st.result && !told.has(st.id) && producer(run, st) !== key);
+  if (!news.length) return '';
+  return `其他 Agent 刚完成的步骤（供你接着做）：\n\n${news.map((st) => `### ${st.title}（${agentName(s(), st.agentId)}）\n${(st.result ?? '').slice(0, 3000)}`).join('\n\n')}`;
+}
+
+function markShown(runId: string, key: string) {
+  store.update((d) => {
+    const r = d.runs[runId];
+    if (!r) return;
+    const ids = r.plan.filter((st) => st.status === 'done').map((st) => st.id);
+    r.shown = { ...r.shown, [key]: ids };
+  });
+}
+
+/** What a CLI agent that has not worked on this run yet needs to know: the goal, the plan, what is done. */
+function briefing(task: Task, run: Run) {
+  const done = run.plan.filter((st) => st.status === 'done' && st.result);
+  return [
+    `任务目标：\n${task.goal}`,
+    `计划：\n${run.plan.map((st, i) => `${i + 1}. ${st.title}（${agentName(s(), st.agentId)}）：${st.detail}`).join('\n')}`,
+    done.length ? `已完成的步骤：\n${done.map((st) => `### ${st.title}\n${(st.result ?? '').slice(0, 3000)}`).join('\n\n')}` : '',
+  ].filter(Boolean).join('\n\n');
 }
 
 async function planTurn(runId: string, gen: number) {
@@ -604,14 +702,14 @@ async function planTurn(runId: string, gen: number) {
   const task = s().tasks[run.taskId];
   const engine = task.engine!;
   const cli = !isApi(engine);
-  const spec = specFor(task, run, 'plan', 'orchestrator', planPrompt(task, cli), 'work');
+  const spec = specFor(task, run, 'plan', 'orchestrator', planPrompt(task, run, cli), 'work');
   markDelivered(task.id, runId);
   if (!spec.ok) throw Object.assign(new Error(spec.error), { code: 'CONFIG' });
-  if (isApi(engine)) spec.value.messages = [{ role: 'user', content: planPrompt(task, false) }];
+  if (isApi(engine)) spec.value.messages = [{ role: 'user', content: planPrompt(task, run, false) }];
   store.update((d) => { const r = d.runs[runId]; if (r) r.live = { agentId: 'orchestrator', activity: 'thinking', text: '拆解目标、制定计划' }; });
   const res = await runTurn({ task, runId, agentId: 'orchestrator', kind: 'plan', spec: spec.value, view: (raw) => raw.split('```')[0], eager: true });
   if (halted(runId, gen) || res.stopReason === 'interrupted') return;
-  const allowed: AgentId[] = cli ? ['orchestrator'] : task.agentIds;
+  const allowed: AgentId[] = rosterOf(task);
   const parsed = parsePlan(res.text, allowed)
     ?? (res.plan?.length ? res.plan.map((p) => ({ title: p.text.slice(0, 40), detail: p.text, agent: 'orchestrator' as AgentId })) : null);
   store.update((d) => {
@@ -621,11 +719,11 @@ async function planTurn(runId: string, gen: number) {
     const steps = parsed ?? [{ title: '完成目标', detail: task.goal.slice(0, 120), agent: 'orchestrator' as AgentId }];
     r.plan = steps.map((x, index): PlanStep => ({ id: uid('step'), index, title: x.title, detail: x.detail, agentId: x.agent, status: 'pending', toolCallIds: [] }));
     r.planReady = true;
-    r.cursor = { phase: 'executing', step: 0, beat: 0, beatElapsed: 0, beatStarted: false };
+    r.cursor = { phase: 'executing', step: 0 };
     // The intro bubble shows only the words before the JSON; give it a voice line if it was empty.
     const intro = [...t.messages].reverse().find((m) => m.runId === runId && m.kind === 'plan');
-    if (!intro) t.messages.push({ id: uid('msg'), role: 'agent', agentId: 'orchestrator', runId, kind: 'plan', text: voice() ? eventLine(voice()!, 'plan', callName()) : '计划已生成。', at: now(), simulated: false, live: true, persona: voice() });
-    if (!parsed) t.messages.push({ id: uid('msg'), role: 'system', runId, text: '没能从回复里读出计划，改为一步完成整个目标。', at: now(), simulated: false });
+    if (!intro) t.messages.push({ id: uid('msg'), role: 'agent', agentId: 'orchestrator', runId, kind: 'plan', text: voice() ? eventLine(voice()!, 'plan', callName()) : '计划已生成。', at: now(), persona: voice() });
+    if (!parsed) t.messages.push({ id: uid('msg'), role: 'system', runId, text: '没能从回复里读出计划，改为一步完成整个目标。', at: now() });
     pushEvent(d, { runId, kind: 'step', level: 'info', text: `计划已生成：共 ${r.plan.length} 步` });
   });
 }
@@ -633,7 +731,6 @@ async function planTurn(runId: string, gen: number) {
 async function stepTurn(runId: string, i: number, gen: number) {
   let run = live(runId)!;
   const task = s().tasks[run.taskId];
-  const cli = !isApi(task.engine!);
   const extras = extrasFor(task, run);
   markDelivered(task.id, runId);
   const resumed = run.plan[i].status !== 'pending';
@@ -652,11 +749,23 @@ async function stepTurn(runId: string, i: number, gen: number) {
   });
   run = live(runId)!;
   const step = run.plan[i];
-  const prompt = stepPrompt(run, i, extras, cli) + (resumed ? '\n\n（这一步刚才被中断过，请检查已经做了什么，再接着完成。）' : '');
-  const agent = cli ? 'orchestrator' : step.agentId;
-  const spec = specFor(task, run, 'step', agent, prompt, 'work');
-  if (!spec.ok) throw Object.assign(new Error(spec.error), { code: 'CONFIG' });
-  const res = await runTurn({ task, runId, stepId: step.id, agentId: agent, kind: 'note', spec: spec.value, eager: true });
+  const agent: AgentId = rosterOf(task).includes(step.agentId) ? step.agentId : 'orchestrator';
+  const own = agent !== 'orchestrator' ? run.agentEngines?.[agent] : undefined;
+  const engine = own ?? task.engine!;
+  const ownCli = !!own && own.auth === 'cli';
+  let prompt = stepPrompt(run, i, extras, !isApi(engine)) + (resumed ? '\n\n（这一步刚才被中断过，请检查已经做了什么，再接着完成。）' : '');
+  // A CLI agent on its own model starts without the run's history: brief it once.
+  const key = sessionKey(run, agent, engine);
+  if (ownCli && !task.agentSessions?.[agent]) prompt = `${briefing(task, run)}\n\n---\n\n${prompt}`;
+  else if (key) { const news = unseen(run, key); if (news) prompt = `${news}\n\n---\n\n${prompt}`; }
+  if (key) markShown(runId, key);
+  const spec = specFor(task, run, 'step', agent, prompt, 'work', engine);
+  if (!spec.ok) throw Object.assign(new Error(own ? `${agentName(s(), agent)}（${own.label}）：${spec.error}` : spec.error), { code: 'CONFIG' });
+  if (own) store.update((d) => { const st = d.runs[runId]?.plan[i]; if (st) st.engineLabel = own.label; });
+  const res = await runTurn({
+    task, runId, stepId: step.id, agentId: agent, kind: 'note', spec: spec.value, eager: true,
+    sessionAgent: ownCli ? agent : undefined, onlyTools: toolsOf(agent),
+  });
   if (res.stopReason === 'interrupted' || halted(runId, gen)) return;
   store.update((d) => {
     const r = d.runs[runId];
@@ -682,8 +791,12 @@ async function summaryTurn(runId: string, gen: number) {
     `所有步骤都已结束${skipped ? `（其中 ${skipped} 步被跳过，没有执行）` : ''}。请用你的口吻向「${callName()}」做最终汇报：先一句话给结论，再分点列出关键结果；有文件改动的话列出位置。不超过 300 字，不要再贴大段代码。`,
     extras.length ? `${callName()} 在最后补充了：\n${extras.map((x) => `- ${x}`).join('\n')}\n请在汇报里回应这些补充。这一轮不能再动手；如果需要再做，请提醒对方重新运行。` : '',
   ].filter(Boolean).join('\n\n');
-  const spec = specFor(task, run, 'summary', 'orchestrator', prompt, 'chat');
+  // A CLI session writing the summary has not seen what other agents' own models did.
+  const key = sessionKey(run, 'orchestrator', task.engine!);
+  const news = key ? unseen(run, key) : '';
+  const spec = specFor(task, run, 'summary', 'orchestrator', news ? `${news}\n\n---\n\n${prompt}` : prompt, 'chat');
   if (!spec.ok) throw Object.assign(new Error(spec.error), { code: 'CONFIG' });
+  if (key) markShown(runId, key);
   store.update((d) => { const r = d.runs[runId]; if (r) r.live = { agentId: 'orchestrator', activity: 'thinking', text: '整理结果、写总结' }; });
   const res = await runTurn({ task, runId, agentId: 'orchestrator', kind: 'summary', spec: spec.value, eager: true });
   if (res.stopReason === 'interrupted' || halted(runId, gen)) return;
@@ -693,7 +806,7 @@ async function summaryTurn(runId: string, gen: number) {
 }
 
 function report(task: Task, run: Run, summary: string) {
-  const lines = [`# ${task.title}`, '', `> ${run.engineLabel ?? '真实模型'} · 运行 #${run.attempt} · ${new Date().toLocaleString('zh-CN')}`, '', '## 总结', '', summary.trim() || '（没有总结）', '', '## 各步骤结果', ''];
+  const lines = [`# ${task.title}`, '', `> ${run.engineLabel ?? '模型'} · 运行 #${run.attempt} · ${new Date().toLocaleString('zh-CN')}`, '', '## 总结', '', summary.trim() || '（没有总结）', '', '## 各步骤结果', ''];
   run.plan.forEach((st, i) => {
     lines.push(`### ${i + 1}. ${st.title}`, '');
     lines.push(st.status === 'done' ? (st.result?.trim() || '（没有文字结果）') : st.status === 'skipped' ? '（已跳过，没有执行）' : `（${st.status}）`, '');
@@ -717,9 +830,9 @@ function completeLive(runId: string, summary: string) {
     if (!r || !t) return;
     const at = now();
     const last = r.plan[r.plan.length - 1];
-    r.artifacts.push({ id: uid('art'), runId, stepId: last?.id ?? '', name: '结果汇总.md', kind: 'report', language: 'md', content: report(t as Task, r as Run, summary), createdAt: at, simulated: false });
+    r.artifacts.push({ id: uid('art'), runId, stepId: last?.id ?? '', name: '结果汇总.md', kind: 'report', language: 'md', content: report(t as Task, r as Run, summary), createdAt: at });
     const diff = changes(r as Run);
-    if (diff) r.artifacts.push({ id: uid('art'), runId, stepId: last?.id ?? '', name: '文件改动.diff', kind: 'diff', language: 'diff', content: diff, createdAt: at, simulated: false });
+    if (diff) r.artifacts.push({ id: uid('art'), runId, stepId: last?.id ?? '', name: '文件改动.diff', kind: 'diff', language: 'diff', content: diff, createdAt: at });
     r.status = 'completed';
     r.endedAt = at;
     r.cursor.phase = 'done';
@@ -761,7 +874,7 @@ function failLive(runId: string, e: Error & { code?: string }, phase?: RunCtx['p
     for (const c of r.toolCalls) if (c.status === 'running' || c.status === 'awaiting') Object.assign(c, { status: 'cancelled', endedAt: at });
     r.errors.push({ id: uid('err'), at, runId, stepId: step.id, title: step.title, code: e.code || 'ERROR', message: e.message.split('\n')[0].slice(0, 300), detail: e.message, fatal: true });
     const v = d.settings.persona ? d.settings.mode : undefined;
-    t.messages.push({ id: uid('msg'), role: 'agent', agentId: 'orchestrator', runId, kind: 'error', at, simulated: false, live: true, persona: v,
+    t.messages.push({ id: uid('msg'), role: 'agent', agentId: 'orchestrator', runId, kind: 'error', at, persona: v,
       text: `${v ? `${eventLine(v, 'failed', d.settings.callName || '开拓者')}\n\n` : ''}第 ${step.index + 1} 步「${step.title}」失败：${e.message}` });
     pushEvent(d, { runId, kind: 'run', level: 'error', text: `运行 #${r.attempt} 失败：${step.title}`, refId: step.id });
     touch(d, t.id, at);
@@ -817,7 +930,7 @@ export function startLiveRun(taskId: string, retry?: { retryOf: string; mode: 'r
   const st = s();
   const task = st.tasks[taskId];
   if (!task?.engine) return fail('这个任务没有接入模型。');
-  if (!desktop) return fail('需要桌面版才能调用真实模型。');
+  if (!desktop) return fail('需要桌面版才能调用模型。');
   const b = baseSpec(task.engine);
   if (!b.ok) return b;
   if (task.runIds.some((id) => OPEN.has(st.runs[id]?.status))) return fail('这个任务已有进行中的运行。');
@@ -827,15 +940,15 @@ export function startLiveRun(taskId: string, retry?: { retryOf: string; mode: 'r
     const t = d.tasks[taskId];
     const at = now();
     if (retry) dropToasts(d, `run:${retry.retryOf}`);
-    // 从头运行 starts a fresh CLI conversation; 继续 keeps the agent's memory of what it did.
-    if (!retry || retry.mode === 'restart') t.session = undefined;
+    // 从头运行 starts fresh CLI conversations; 继续 keeps the agents' memory of what they did.
+    if (!retry || retry.mode === 'restart') { t.session = undefined; t.agentSessions = undefined; }
     const run: Run = {
       id: uid('run'), taskId, attempt: t.runIds.length + 1, status: 'running', createdAt: at, startedAt: at, activeMs: 0,
       plan: [], planReady: false, toolCalls: [], approvals: [], artifacts: [], errors: [], terminal: [],
       // The model's window (1M for most of this generation); CLI agents compact on their own.
       usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, contextUsed: 0, contextLimit: contextOf(PROVIDER_BY_ID[t.engine!.provider], t.engine!.model).tokens, series: [] },
-      cursor: { phase: 'planning', step: 0, beat: 0, beatElapsed: 0, beatStarted: false },
-      source: 'live', engineLabel: t.engine!.label,
+      cursor: { phase: 'planning', step: 0 },
+      engineLabel: t.engine!.label,
       live: { agentId: 'orchestrator', activity: 'thinking', text: '准备开始' },
     };
     if (prev) {
@@ -850,15 +963,33 @@ export function startLiveRun(taskId: string, retry?: { retryOf: string; mode: 'r
           : { id: uid('step'), index, title: old.title, detail: old.detail, agentId: old.agentId, status: 'pending', toolCallIds: [] }));
       }
     }
+    // Agents with their own model (Agent page), as set now; one whose way is not ready falls back to the task's.
+    const own: NonNullable<Run['agentEngines']> = {};
+    const noFolder: string[] = [];
+    for (const id of rosterOf(t as Task)) {
+      if (id === 'orchestrator') continue;
+      const e = agentEngine(d.models as AppState['models'], d.agents.find((a) => a.id === id)?.engine, { cwd: t.engine!.cwd, access: t.engine!.access, browser: t.engine!.browser });
+      if (!e) continue;
+      // A command-line agent works in the task's folder; a task made without one cannot host it.
+      if (e.auth === 'cli' && !t.engine!.cwd) { noFolder.push(agentName(d, id)); continue; }
+      own[id] = e;
+    }
+    if (Object.keys(own).length) run.agentEngines = own;
+    // 继续 keeps an agent's session only if it is still on the same program (a Codex thread cannot be resumed by Claude Code).
+    for (const [id, sid] of Object.entries(t.agentSessions ?? {})) {
+      const was = prev?.agentEngines?.[id as AgentId];
+      const now = own[id as AgentId];
+      if (sid && (!was || !now || was.provider !== now.provider || was.driver !== now.driver || now.auth !== 'cli')) delete t.agentSessions![id as AgentId];
+    }
     d.runs[run.id] = run;
     t.runIds.push(run.id);
     t.updatedAt = at;
     id = run.id;
     const carried = run.plan.filter((x) => x.carried).length;
     const skillNames = taskSkills(t as Task).map((x) => x.name);
-    t.messages.push({ id: uid('msg'), role: 'system', runId: run.id, at, simulated: false,
-      text: `${run.attempt > 1 ? `第 ${run.attempt} 次运行` : '开始运行'}（${t.engine!.label}${isApi(t.engine!) ? '' : ` · ${t.engine!.cwd}`}）${carried ? `：前 ${carried} 步沿用上次结果` : ''}。${skillNames.length ? `可用技能：${skillNames.join('、')}。` : ''}${browserOn(t.engine as TaskEngine) ? '可以操作萤火浏览器。' : ''}` });
-    term(run, 'sys', `# 真实运行 · ${t.engine!.label}${t.engine!.cwd ? ` · 工作文件夹 ${t.engine!.cwd}` : ''}`, at);
+    t.messages.push({ id: uid('msg'), role: 'system', runId: run.id, at,
+      text: `${run.attempt > 1 ? `第 ${run.attempt} 次运行` : '开始运行'}（${t.engine!.label}${t.engine!.cwd ? ` · ${t.engine!.cwd}` : ''}）${carried ? `：前 ${carried} 步沿用上次结果` : ''}。${Object.entries(own).map(([id, e]) => `${agentName(d, id as AgentId)}用 ${e!.label}。`).join('')}${noFolder.length ? `${noFolder.join('、')}的命令行模型需要工作文件夹，这个任务没有，这次改用任务的模型。` : ''}${skillNames.length ? `可用技能：${skillNames.join('、')}。` : ''}${browserOn(t.engine as TaskEngine) ? '可以操作萤火浏览器。' : ''}` });
+    term(run, 'sys', `# 运行 #${run.attempt} · ${t.engine!.label}${t.engine!.cwd ? ` · 工作文件夹 ${t.engine!.cwd}` : ''}`, at);
     pushEvent(d, { runId: run.id, kind: 'run', level: 'info', text: `运行 #${run.attempt} 开始：${t.title}` });
   });
   launch(id);
@@ -908,6 +1039,9 @@ export function resumeLive(runId: string): Result {
     touch(d, run.taskId, now());
     dropToasts(d, `run:${runId}`);
   });
+  // The pause flag stopped the old loop; the new one must not see it (the generation check keeps
+  // the old loop stopped while it unwinds).
+  ctxOf(runId).halt = undefined;
   launch(runId);
   return ok(undefined);
 }
@@ -965,7 +1099,7 @@ export function messageLive(taskId: string, text: string): Result {
   const forward = !!(open && c?.streamId && c.supportsInput && open.status === 'running');
   store.update((d) => {
     const t = d.tasks[taskId];
-    t.messages.push({ id: uid('msg'), role: 'user', runId, text, at: now(), simulated: false, delivered: forward || undefined });
+    t.messages.push({ id: uid('msg'), role: 'user', runId, text, at: now(), delivered: forward || undefined });
     pushEvent(d, { runId, kind: 'user', level: 'info', text: '你发送了补充说明' });
     touch(d, taskId, now());
   });
@@ -981,7 +1115,7 @@ export function messageLive(taskId: string, text: string): Result {
 }
 
 function note(taskId: string, runId: string | undefined, text: string) {
-  store.update((d) => { d.tasks[taskId]?.messages.push({ id: uid('msg'), role: 'system', runId, text, at: now(), simulated: false }); });
+  store.update((d) => { d.tasks[taskId]?.messages.push({ id: uid('msg'), role: 'system', runId, text, at: now() }); });
 }
 
 /* ───────────── 闲聊 ───────────── */
@@ -1008,12 +1142,18 @@ export async function reply(taskId: string, opts: { nudge?: boolean; greet?: boo
   if (chatBusy.has(taskId)) return;
   const engine = task.engine;
   const v = voice();
-  if (!engine) { demoReply(taskId, opts); return; }
+  if (!engine) {
+    // Greetings and nudges need a model too; only a message the user sent deserves an answer here.
+    if (!opts.greet && !opts.nudge) {
+      store.update((d) => { d.tasks[taskId]?.messages.push({ id: uid('msg'), role: 'system', text: '这个对话还没有选模型。在下面选一个已接入的模型，或先到「模型接入」里接入一个。', at: now() }); });
+    }
+    return;
+  }
   const b = baseSpec(engine);
   const purpose: PromptPurpose = opts.nudge || opts.greet ? 'nudge' : opts.followUp ? 'reply' : 'chat';
   const hint = opts.greet ? GREET_PROMPT : opts.nudge ? NUDGE_PROMPT : undefined;
   if (!b.ok) {
-    store.update((d) => { d.tasks[taskId]?.messages.push({ id: uid('msg'), role: 'system', text: `没能回复：${b.error}`, at: now(), simulated: false }); });
+    store.update((d) => { d.tasks[taskId]?.messages.push({ id: uid('msg'), role: 'system', text: `没能回复：${b.error}`, at: now() }); });
     return;
   }
   const spec = b.value;
@@ -1052,7 +1192,7 @@ export async function reply(taskId: string, opts: { nudge?: boolean; greet?: boo
     await runTurn({ task, runId: opts.followUp ? lastRun?.id : undefined, agentId: 'orchestrator', kind: opts.followUp ? 'reply' : undefined, spec, eager: true, chat: true });
   } catch (e) {
     store.update((d) => {
-      d.tasks[taskId]?.messages.push({ id: uid('msg'), role: 'agent', agentId: 'orchestrator', kind: 'error', at: now(), simulated: false, live: true, persona: v,
+      d.tasks[taskId]?.messages.push({ id: uid('msg'), role: 'agent', agentId: 'orchestrator', kind: 'error', at: now(), persona: v,
         text: `${v === 'sam' ? '通信中断。' : v === 'firefly' ? '抱歉……我没能回复。' : '没能回复。'}${(e as Error).message}` });
       toast(d, { tone: 'danger', title: '回复失败', body: (e as Error).message.slice(0, 140), key: `chat:${taskId}` });
     });
@@ -1077,8 +1217,6 @@ function transcript(task: Task, upTo: number) {
 
 /** Stop the reply being written in a chat (keeps what has arrived so far). */
 export function stopReply(taskId: string) {
-  const demo = demoFinish.get(taskId);
-  if (demo) { demo(); return; }
   const id = chatBusy.get(taskId);
   if (id && id !== 'starting') void desktop?.stop(id, 'kill');
 }
@@ -1098,52 +1236,7 @@ export function regenerate(taskId: string) {
   void reply(taskId, lastUser < 0 ? { greet: true } : {});
 }
 
-const demoFinish = new Map<string, () => void>();
-
-/** 演示模式: a canned reply in her voice, typed out at a reading pace. Honest about not understanding. */
-function demoReply(taskId: string, opts: { nudge?: boolean; greet?: boolean }) {
-  const task = s().tasks[taskId];
-  if (!task) return;
-  const st = settings();
-  const v = voice() ?? st.mode;
-  const last = [...task.messages].reverse().find((m) => m.role === 'user')?.text ?? '';
-  const full = opts.greet ? greeting(v, callName()) : opts.nudge ? demoNudge(v, task.messages.length) : demoChatReply(v, callName(), last);
-  const id = uid('msg');
-  chatBusy.set(taskId, id);
-  store.update((d) => {
-    d.tasks[taskId]?.messages.push({ id, role: 'agent', agentId: 'orchestrator', text: '', at: now(), simulated: true, streaming: true, persona: st.persona ? v : undefined });
-  });
-  const chars = Array.from(full);
-  let shown = 0;
-  let wait = 0;
-  let timer = 0;
-  const finish = (stopped = false) => {
-    window.clearTimeout(wait);
-    window.clearInterval(timer);
-    demoFinish.delete(taskId);
-    chatBusy.delete(taskId);
-    store.update((d) => {
-      const t = d.tasks[taskId];
-      const m = t?.messages.find((x) => x.id === id);
-      if (!t || !m) return;
-      const text = stopped ? chars.slice(0, shown).join('') : full;
-      if (!text) t.messages = t.messages.filter((x) => x.id !== id);
-      else { m.text = text; m.streaming = false; }
-      touch(d, taskId, now());
-    });
-  };
-  demoFinish.set(taskId, () => finish(true));
-  if (st.typing === 'instant') { wait = window.setTimeout(() => finish(), 250); return; }
-  wait = window.setTimeout(() => {
-    timer = window.setInterval(() => {
-      shown = Math.min(chars.length, shown + 2);
-      if (shown >= chars.length) { finish(); return; }
-      store.update((d) => { const m = d.tasks[taskId]?.messages.find((x) => x.id === id); if (m) m.text = chars.slice(0, shown).join(''); });
-    }, 45);
-  }, 500 + Math.min(1200, chars.length * 12));
-}
-
-/** The task is going away (deleted, or 重置演示数据): stop its runs and any reply being written. */
+/** The task is going away (deleted, or 清除所有任务记录): stop its runs and any reply being written. */
 export function forgetTask(taskId: string) {
   const task = s().tasks[taskId];
   if (!task) return;
@@ -1161,7 +1254,6 @@ export function normalizeAfterLoad(d: D) {
     for (const m of t.messages) if (m.streaming) m.streaming = false;
   }
   for (const r of Object.values(d.runs)) {
-    if (r.source !== 'live') continue;
     for (const a of r.approvals) if (a.status === 'pending') a.status = 'expired';
     for (const c of r.toolCalls) if (c.status === 'running' || c.status === 'awaiting') Object.assign(c, { status: 'cancelled' });
     for (const st of r.plan) if (st.status === 'awaiting') st.status = 'running';

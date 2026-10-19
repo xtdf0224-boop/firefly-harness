@@ -2,15 +2,16 @@
    1. 短片: a few seconds cut from the official Firefly PV「壳中萤火」 (流萤 mode: meteors over the dawn
       city → her smile; 萨姆 mode: armour plates locking → SAM spreading its light-wings).
    2. 标题画面: the clip's last frame holds and slowly pushes in, fireflies drift up, the mark and title
-      sit top-left, 「点击进入」 breathes at the bottom with the version and 演示模式 line.
+      sit top-left, 「点击进入」 breathes at the bottom with the version and model line.
    3. 进入: click / Enter / any key → a light sweep and the workbench floats up.
    Skip during the clip jumps to the title screen. Settings › 外观 picks 点击进入 or 自动进入, or turns it off.
    Reduced motion, or a clip that fails to load, goes straight to a still title screen. */
+import { version as APP_VERSION } from '../../../package.json';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useReducedMotion } from '../../lib/hooks';
+import { engineChoices } from '../../state/models';
 import { openRuns, pendingApprovals } from '../../state/selectors';
 import { shallow, useApp } from '../../state/store';
-import { PROVIDERS, readiness } from '../../lib/providers';
 import { cx, Kbd } from '../ui';
 import { WingMark } from './WingMark';
 
@@ -37,7 +38,7 @@ export function BootSplash({ onDone, onLeave }: { onDone: () => void; onLeave?: 
   const mode = useApp((s) => s.settings.mode);
   const autoEnter = useApp((s) => s.settings.bootEnter === 'auto');
   const stats = useApp((s) => ({ tasks: s.taskOrder.length, open: openRuns(s).length, pending: pendingApprovals(s).length }), shallow);
-  const liveCount = useApp((s) => PROVIDERS.filter((p) => readiness(p, s.models.providers[p.id], s.models.providers[p.id].auth).ready).length);
+  const modelCount = useApp((s) => engineChoices(s.models).length);
   const reduced = useReducedMotion();
   const clip = CLIP[mode];
   const base = import.meta.env.BASE_URL;
@@ -169,9 +170,9 @@ export function BootSplash({ onDone, onLeave }: { onDone: () => void; onLeave?: 
       </div>
 
       <p className="boot__meta">
-        <span>版本 0.2.0</span>
+        <span>版本 {APP_VERSION}</span>
         <span aria-hidden>·</span>
-        <span>{liveCount > 0 ? `已接入 ${liveCount} 个模型` : '演示模式（模拟数据）'}</span>
+        <span>{modelCount > 0 ? `已接入 ${modelCount} 个模型` : '还没有接入模型'}</span>
         <span aria-hidden>·</span>
         <span>{stats.tasks} 个任务{stats.pending ? ` · ${stats.pending} 项待确认` : ''}</span>
       </p>

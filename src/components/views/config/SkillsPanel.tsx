@@ -1,4 +1,4 @@
-/* 技能 on 工具与连接: install your own skills (a folder with SKILL.md, the Claude Code / DeepSeek
+/* 技能 on 工具与技能: install your own skills (a folder with SKILL.md, the Claude Code / DeepSeek
    Harness format), turn them on or off, open, delete; plus the bundled examples and a template. */
 import { AlertTriangle, BookOpen, FolderOpen, Plus, RefreshCw, Sparkles, Trash2, Upload } from 'lucide-react';
 import { useEffect, useId, useState, type FormEvent } from 'react';
@@ -27,7 +27,7 @@ export function SkillsPanel() {
     <Panel label="技能" title="自定义技能" icon={Sparkles} energy className="skills-panel"
       actions={desktopOk ? <IconButton icon={RefreshCw} size="sm" label="刷新技能列表" onClick={() => void skillActions.refresh()} /> : undefined}>
       <p className="skills-panel__lead">
-        技能是一个带 <code>SKILL.md</code> 的文件夹：写清楚「什么时候用」和「怎么做」，接入模型时 Agent 会在合适的时候照着做，也可以带上脚本和参考资料。格式与 Claude Code、DeepSeek Harness 的技能相同，可以直接导入。
+        技能是一个带 <code>SKILL.md</code> 的文件夹：写清楚「什么时候用」和「怎么做」，Agent 会在合适的时候照着做，也可以带上脚本和参考资料。格式与 Claude Code、DeepSeek Harness 的技能相同，可以直接导入。
         <a href={`${REPO_URL}/blob/main/docs/SKILLS.md`} target="_blank" rel="noreferrer"><BookOpen size={12} aria-hidden />怎么写一个技能</a>
       </p>
 

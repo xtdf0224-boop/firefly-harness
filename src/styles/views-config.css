@@ -1,5 +1,5 @@
 /* 萤火 · views-config.css
-   Agent 名册 (.agents-), 工具与连接 (.tools-), 运行历史 (.history-), 设置 (.settings-).
+   Agent 名册 (.agents-), 工具与技能 (.tools-), 运行历史 (.history-), 设置 (.settings-).
    Colours come from tokens; shapes use the mode-dependent radius tokens + corner-shape, so 萨姆's
    bevels arrive for free. SAM-only accents live under :root[data-mode="sam"]. Nothing here animates:
    the only motion on these pages (breathing glow, spinning icons) comes from shared classes that
@@ -53,32 +53,7 @@
 .agents-card .switch-row.is-disabled .switch { opacity: 0.55; }
 
 .agents-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.agents-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-3); }
-
-.agents-tools { display: flex; flex-wrap: wrap; gap: 6px; }
-.agents-tool {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 9px 0 7px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--chip-radius);
-  corner-shape: var(--corner);
-  background: var(--surface-sunken);
-  color: var(--text-2);
-  font-size: var(--fs-xs);
-  line-height: 1;
-  white-space: nowrap;
-  cursor: help;
-}
-.agents-tool svg { flex: none; }
-.agents-tool.is-auto svg { color: var(--firefly); }
-.agents-tool.is-confirm svg { color: var(--gold); }
-/* A disabled tool differs by shape (dashed edge, struck through, ban icon), not colour alone. */
-.agents-tool.is-off { border-style: dashed; color: var(--text-3); text-decoration: line-through; text-decoration-thickness: 1px; }
-.agents-tool.is-off svg { color: var(--text-3); }
-:root[data-mode="sam"] .agents-tool { font-family: var(--font-mono); letter-spacing: 0.02em; }
+.agents-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-3); }/* A disabled tool differs by shape (dashed edge, struck through, ban icon), not colour alone. */
 
 .agents-now { display: flex; flex-wrap: wrap; align-items: center; gap: 6px var(--sp-2); min-height: 24px; font-size: var(--fs-sm); color: var(--text-2); }
 .agents-now__task { display: inline-flex; align-items: baseline; gap: 2px; min-width: 0; max-width: 100%; }
@@ -128,9 +103,7 @@
 .agents-card.is-disabled { background: var(--surface-sunken); border-style: dashed; }
 .agents-card.is-disabled .avatar { opacity: 0.5; filter: grayscale(0.85); }
 .agents-card.is-disabled .agents-card__name { color: var(--text-2); }
-.agents-card.is-disabled .agents-tools { opacity: 0.85; }
-
-/* ───────────── 工具与连接 ───────────── */
+/* ───────────── 工具与技能 ───────────── */
 
 /* Policy key: explained once, above the list. */
 .tools-policy {
@@ -189,79 +162,6 @@
   .tools-row__usage { margin-left: auto; }
 }
 
-/* Connections */
-.tools-conns {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
-  gap: var(--sp-3);
-}
-.tools-conn {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  min-width: 0;
-  padding: var(--sp-4);
-  border: 1px solid var(--line);
-  border-radius: var(--card-radius);
-  corner-shape: var(--corner);
-  background: var(--surface-sunken);
-}
-:root[data-mode="sam"] .tools-conn::after {
-  content: "";
-  position: absolute;
-  top: 6px;
-  right: 10px;
-  width: 14px;
-  height: 2px;
-  background: var(--mint);
-  opacity: 0.5;
-  pointer-events: none;
-}
-/* State is carried by the chip text; the edge treatment backs it up with shape. */
-.tools-conn.is-degraded { border-color: rgb(242 200 121 / 0.4); box-shadow: inset 3px 0 0 var(--tone-warning); }
-.tools-conn.is-reconnecting { border-color: rgb(130 200 255 / 0.4); box-shadow: inset 3px 0 0 var(--tone-info); }
-.tools-conn.is-disconnected {
-  border: 1px dashed rgb(255 139 123 / 0.55);
-  box-shadow: inset 3px 0 0 var(--tone-danger);
-  background: linear-gradient(90deg, var(--tone-danger-soft), transparent 70%), var(--surface-sunken);
-}
-.tools-conn__head { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
-.tools-conn__icon {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  flex: none;
-  border: 1px solid var(--line-2);
-  border-radius: var(--control-radius);
-  corner-shape: var(--corner);
-  background: var(--surface);
-  color: var(--mint);
-}
-.tools-conn__id { flex: 1; min-width: 0; }
-.tools-conn__name { font-size: var(--fs-md); line-height: var(--lh-tight); }
-.tools-conn__endpoint { display: flex; flex-wrap: wrap; align-items: center; gap: 6px var(--sp-2); min-width: 0; }
-.tools-conn__endpoint code {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0;
-  border: 0;
-  background: none;
-  font-size: var(--fs-xs);
-  color: var(--text-3);
-}
-.tools-conn__meta { display: flex; gap: var(--sp-6); margin: 0; font-size: var(--fs-sm); }
-.tools-conn__meta > div { display: flex; flex-direction: column; gap: 2px; }
-.tools-conn__meta dt { font-size: var(--fs-xs); color: var(--text-3); }
-.tools-conn__meta dd { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; }
-.tools-conn__detail { font-size: var(--fs-sm); color: var(--text-2); }
-.tools-conn__retry { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: var(--fw-medium); color: var(--tone-danger); font-variant-numeric: tabular-nums; }
-.tools-conn__retry svg { flex: none; }
-.tools-conn__actions { display: flex; align-items: center; gap: var(--sp-2); margin-top: auto; }
-
 /* ───────────── 运行历史 ───────────── */
 
 .history-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: var(--gap-shell); }
@@ -289,7 +189,6 @@
   background: linear-gradient(90deg, var(--seam), transparent);
   pointer-events: none;
 }
-.history-tile__top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px var(--sp-2); }
 .history-tile__value {
   margin-top: 4px;
   font-size: var(--fs-2xl);
@@ -389,6 +288,8 @@
   color: var(--text);
   font-weight: var(--fw-medium);
 }
+.history-model { display: inline-flex; align-items: center; gap: 6px; }
+.history-model__name { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
 .history-link:hover { color: var(--mint-strong); text-decoration: underline; text-decoration-color: var(--mint-line); text-underline-offset: 3px; }
 
 /* ───────────── 设置 ───────────── */
@@ -411,21 +312,6 @@
 .settings-row__title { font-size: var(--fs-md); color: var(--text); }
 .settings-row__desc { margin-top: 2px; font-size: var(--fs-xs); color: var(--text-3); }
 
-.settings-note {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px dashed rgb(242 200 121 / 0.45);
-  border-radius: var(--control-radius);
-  corner-shape: var(--corner);
-  background: rgb(242 200 121 / 0.06);
-  font-size: var(--fs-sm);
-  color: var(--text-2);
-}
-.settings-note svg { color: var(--gold); flex: none; }
-
 /* Shortcuts and about: definition lists. */
 .settings-keys { display: flex; flex-direction: column; margin: 0; }
 .settings-keys__row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: 10px 0; border-top: 1px solid var(--line); }
@@ -439,7 +325,6 @@
 .settings-about > div { display: flex; flex-direction: column; gap: 2px; }
 .settings-about dt { font-size: var(--fs-xs); color: var(--text-3); }
 .settings-about dd { margin: 0; font-size: var(--fs-sm); color: var(--text); }
-.settings-about dd .sim-tag { margin-left: 6px; vertical-align: middle; }
 
 /* Visual mode picker: two radio cards, each with a miniature of its own look. */
 .settings-modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: var(--sp-3); margin-top: var(--sp-3); }
@@ -610,7 +495,6 @@
 @media (max-width: 639px) {
   .tools-row__policy { max-width: 100%; }
   .agents-card__body { padding: var(--sp-3); }
-  .tools-conn__meta { gap: var(--sp-5); }
   .history-search { width: 100%; }
 }
 /* Very narrow phones: tighten the three-way policy switch so it never overflows its row. */

@@ -1,12 +1,13 @@
 /* 任务列表 (view 'tasks'): every task with the state of its latest run. Search, status filter and
    sort are local view state. Rows come from selectSummaries (flat, comparable), so the engine's
    five-per-second commits don't repaint the list unless something visible changed. */
-import { FilterX, Plus, RotateCcw, SearchX, Sparkles } from 'lucide-react';
+import { FilterX, Plug, Plus, SearchX, Sparkles } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useNow } from '../../lib/hooks';
 import { actions } from '../../state/actions';
 import { useApp } from '../../state/store';
-import { Badge, Button, EmptyState, Panel, SimTag } from '../ui';
+import { Badge, Button, EmptyState, Panel } from '../ui';
+import { useChoices, useModelsKnown } from './tasks/choices';
 import { TaskRow } from './tasks/TaskRow';
 import { FILTERS, TaskToolbar, type SortKey, type StatusFilter } from './tasks/TaskToolbar';
 import { selectSummaries, summariesEqual } from './tasks/taskInfo';
@@ -14,6 +15,8 @@ import { selectSummaries, summariesEqual } from './tasks/taskInfo';
 export function TaskListView() {
   const tasks = useApp(selectSummaries, summariesEqual);
   const agents = useApp((s) => s.agents);
+  const { choices } = useChoices();
+  const noModel = useModelsKnown() && choices.length === 0;
   const now = useNow(30_000);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<StatusFilter>('all');
@@ -68,19 +71,19 @@ export function TaskListView() {
               <EmptyState
                 icon={Sparkles}
                 title="还没有任务"
-                body="从一个清晰的目标开始，Agent 会帮你拆解步骤、调用工具，并在关键操作前征求你的确认。"
-                actions={(
+                body={noModel
+                  ? '先接入一个模型，再从一个清晰的目标开始：Agent 会帮你拆解步骤、调用工具，并在关键操作前征求你的确认。'
+                  : '从一个清晰的目标开始，Agent 会帮你拆解步骤、调用工具，并在关键操作前征求你的确认。'}
+                actions={noModel ? (
                   <>
-                    <Button variant="primary" icon={Plus} onClick={() => actions.navigate('new')}>新建任务</Button>
-                    <Button variant="ghost" icon={RotateCcw} onClick={() => actions.openDialog({ kind: 'reset-demo' })}>恢复示例任务</Button>
+                    <Button variant="primary" icon={Plug} onClick={() => actions.navigate('models')}>先接入模型</Button>
+                    <Button variant="ghost" icon={Plus} onClick={() => actions.navigate('new')}>新建任务</Button>
                   </>
+                ) : (
+                  <Button variant="primary" icon={Plus} onClick={() => actions.navigate('new')}>新建任务</Button>
                 )}
               />
             </div>
-            <p className="task-list-empty__note">
-              <SimTag />
-              <span>没有接入模型时，新任务由内置模拟器演示；接入后在新建时选择模型。</span>
-            </p>
           </div>
         ) : (
           <>

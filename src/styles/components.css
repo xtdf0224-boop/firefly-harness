@@ -224,29 +224,6 @@
 }
 .tone-dot--live { animation: ff-breathe-dot var(--breathe) ease-in-out infinite; }
 
-/* 模拟 / 示例 marker. Neutral silver on purpose: gold means 等待你确认, and this tag sits beside
-   almost every chip. The dashed edge + flask icon + word say "not real" without any colour. */
-.sim-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: 4px;
-  border: 1px dashed color-mix(in srgb, var(--text-3) 70%, transparent);
-  color: var(--text-2);
-  background: rgb(159 176 190 / 0.07);
-  font-size: var(--fs-2xs);
-  font-weight: var(--fw-medium);
-  line-height: 1;
-  white-space: nowrap;
-  flex: none;
-  cursor: help;
-}
-.sim-tag--compact { padding: 0 5px; }
-/* 示例数据 (pre-generated history) has a solid edge and a cooler tint, so it differs from live 模拟 at a glance. */
-.sim-tag--sample { border-style: solid; border-color: color-mix(in srgb, var(--tone-paused) 55%, transparent); color: var(--tone-paused); background: var(--tone-paused-soft); }
-
 /* ───────────── Tabs ───────────── */
 .tabs {
   display: flex;
@@ -312,7 +289,7 @@
   corner-shape: var(--corner);
   color: var(--text-2);
   font-size: var(--fs-sm);
-  cursor: pointer;
+  cursor: var(--cur-pointer);
   white-space: nowrap;
   transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
@@ -324,7 +301,7 @@
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-2) 0; }
 .switch-row.is-disabled { opacity: 0.5; }
 .switch-row__text { min-width: 0; }
-.switch-row__label { font-size: var(--fs-md); color: var(--text); cursor: pointer; }
+.switch-row__label { font-size: var(--fs-md); color: var(--text); cursor: var(--cur-pointer); }
 .switch-row__desc { font-size: var(--fs-xs); color: var(--text-3); margin-top: 2px; }
 .switch {
   position: relative;
@@ -617,9 +594,9 @@
   height: 22px;
   margin: 2px 0 0;
   background: transparent;
-  cursor: pointer;
+  cursor: var(--cur-pointer);
 }
-.slider__input:disabled { cursor: not-allowed; }
+.slider__input:disabled { cursor: var(--cur-not-allowed); }
 .slider__input::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: 999px;

@@ -1,24 +1,24 @@
-/* 事件时间线 tab: run / step / tool / approval / connection events in order, newest at the bottom. */
-import { ArrowDown, Bot, History, ListChecks, Play, Plug, SearchX, ShieldAlert, User, Wrench, XOctagon, type LucideIcon } from 'lucide-react';
+/* 事件时间线 tab: run / step / tool / approval events in order, newest at the bottom. */
+import { ArrowDown, Bot, History, ListChecks, Play, SearchX, ShieldAlert, User, Wrench, XOctagon, type LucideIcon } from 'lucide-react';
 import { memo, useMemo } from 'react';
 import { timeOfDay } from '../../lib/format';
-import type { DataSource, EventKind, RunEvent } from '../../lib/types';
+import type { EventKind, RunEvent } from '../../lib/types';
 import { shallow, useApp } from '../../state/store';
-import { Button, EmptyState, Segmented, SimTag, cx } from '../ui';
+import { Button, EmptyState, Segmented, cx } from '../ui';
 import { useFollowScroll, useRemembered, useSpokenResult } from './consoleHooks';
 
 type Scope = 'run' | 'all';
-type KindFilter = 'all' | 'run' | 'step' | 'tool' | 'approval' | 'connection' | 'error';
+type KindFilter = 'all' | 'run' | 'step' | 'tool' | 'approval' | 'error';
 
 const KIND_ICON: Record<EventKind, LucideIcon> = {
-  run: Play, step: ListChecks, tool: Wrench, approval: ShieldAlert, agent: Bot, connection: Plug, user: User, error: XOctagon,
+  run: Play, step: ListChecks, tool: Wrench, approval: ShieldAlert, agent: Bot, user: User, error: XOctagon,
 };
 const KIND_LABEL: Record<EventKind, string> = {
-  run: '运行', step: '步骤', tool: '工具', approval: '确认', agent: 'Agent', connection: '连接', user: '用户', error: '错误',
+  run: '运行', step: '步骤', tool: '工具', approval: '确认', agent: 'Agent', user: '用户', error: '错误',
 };
 const KIND_FILTERS: Array<{ id: KindFilter; label: string }> = [
   { id: 'all', label: '全部' }, { id: 'run', label: '运行' }, { id: 'step', label: '步骤' }, { id: 'tool', label: '工具' },
-  { id: 'approval', label: '确认' }, { id: 'connection', label: '连接' }, { id: 'error', label: '错误' },
+  { id: 'approval', label: '确认' }, { id: 'error', label: '错误' },
 ];
 const LEVEL_WORD: Partial<Record<RunEvent['level'], string>> = { warn: '警告', error: '错误' };
 
@@ -71,7 +71,6 @@ function withDays(events: RunEvent[]): Row[] {
 
 export function TimelineTab({ runId }: { runId?: string }) {
   const events = useApp((s) => s.events);
-  const source = useApp((s): DataSource => (runId ? s.runs[runId]?.source : undefined) ?? 'simulated');
   const [scope, setScope] = useRemembered<Scope>('tl.scope', 'run');
   const [kind, setKind] = useRemembered<KindFilter>('tl.kind', 'all');
 
@@ -95,7 +94,7 @@ export function TimelineTab({ runId }: { runId?: string }) {
       <div className="console__toolbar">
         <Segmented<Scope> size="sm" label="事件范围" value={scope} onChange={setScope} options={[
           { value: 'run', label: '当前运行' },
-          { value: 'all', label: '全部事件', hint: '包括其他运行以及连接等全局事件' },
+          { value: 'all', label: '全部事件', hint: '包括其他运行的事件' },
         ]} />
         <div className="console-chips" role="group" aria-label="事件类型">
           {KIND_FILTERS.map((f) => (
@@ -105,7 +104,6 @@ export function TimelineTab({ runId }: { runId?: string }) {
         <div className="console__toolbar-end">
           <span className="console__hint">{visible.length} 条事件</span>
           <span className="sr-only" role="status">{spoken}</span>
-          <SimTag source={source} />
         </div>
       </div>
 
@@ -127,7 +125,7 @@ export function TimelineTab({ runId }: { runId?: string }) {
             <EmptyState compact icon={History} title="还没有运行" body="开始一个任务后，它的事件会按时间显示在这里。" />
           ) : (
             <EmptyState compact icon={History} title="还没有事件"
-              body={scope === 'run' ? '运行、步骤、工具调用和确认都会记录在这里。' : '连接变化、运行和工具调用都会记录在这里。'}
+              body="运行、步骤、工具调用和确认都会记录在这里。"
               actions={scope === 'run' ? <Button size="sm" variant="secondary" onClick={() => setScope('all')}>查看全部事件</Button> : undefined} />
           )}
         </div>
@@ -142,7 +140,8 @@ export function TimelineTab({ runId }: { runId?: string }) {
 }
 
 const TimelineItem = memo(function TimelineItem({ event, source }: { event: RunEvent; source?: string }) {
-  const Icon = KIND_ICON[event.kind];
+  // Events saved by older versions can carry a kind that no longer exists.
+  const Icon = KIND_ICON[event.kind] ?? History;
   const word = LEVEL_WORD[event.level];
   return (
     <li className={cx('tl__item', `tl__item--${event.level}`)}>
@@ -150,7 +149,7 @@ const TimelineItem = memo(function TimelineItem({ event, source }: { event: RunE
       <span className="tl__node"><Icon size={12} aria-hidden /></span>
       <div className="tl__body">
         <span className="tl__text">
-          <span className="sr-only">{KIND_LABEL[event.kind]}：</span>
+          <span className="sr-only">{KIND_LABEL[event.kind] ?? '事件'}：</span>
           {event.text}
           {word && <span className="tl__level">{word}</span>}
         </span>

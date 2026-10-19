@@ -2,7 +2,7 @@
    helpers for useApp, and the permission icons. Nothing here touches the store except through selectors. */
 import { Ban, ShieldCheck, Zap, type LucideIcon } from 'lucide-react';
 import { isOpenRun } from '../../../lib/status';
-import type { AgentActivity, AppState, DataSource, ToolPermission } from '../../../lib/types';
+import type { AgentActivity, AppState, ToolPermission } from '../../../lib/types';
 import { agentActivity } from '../../../state/selectors';
 import { shallow } from '../../../state/store';
 
@@ -51,12 +51,6 @@ export function selectToolStats(s: AppState): Dict<CallStat> {
     }
   }
   return out;
-}
-
-/** 'sample' only while every run is pre-generated sample history; any live simulated run makes it 'simulated'. */
-export function selectDataSource(s: AppState): DataSource {
-  const runs = Object.values(s.runs);
-  return runs.length > 0 && runs.every((r) => r.source === 'sample') ? 'sample' : 'simulated';
 }
 
 export interface Presence { taskId: string; runId: string; title: string; activity: AgentActivity }

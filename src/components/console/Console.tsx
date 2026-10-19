@@ -1,6 +1,6 @@
 /* The collapsible bottom console: tool calls, terminal output, errors and the event timeline of the
    run being looked at. Collapsed it is a one-line bar with live counters; open it has a drag handle
-   (and arrow keys) for its height. Everything inside is simulator output and is tagged as such. */
+   (and arrow keys) for its height. Everything inside is the real record of the run being looked at. */
 import { ChevronDown, ChevronUp, History, SquareTerminal, Wrench, XOctagon } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { timeOfDay } from '../../lib/format';
@@ -9,7 +9,7 @@ import type { ConsoleTab, RunEvent } from '../../lib/types';
 import { actions } from '../../state/actions';
 import { runLabel } from '../../state/selectors';
 import { shallow, useApp } from '../../state/store';
-import { IconButton, Kbd, SimTag, StatusChip, Tabs, ToneDot, cx, tabPanelProps, type TabItem } from '../ui';
+import { EngineTag, IconButton, Kbd, StatusChip, Tabs, ToneDot, cx, tabPanelProps, type TabItem } from '../ui';
 import { consoleRunId } from './consoleRun';
 import { ErrorsTab } from './ErrorsTab';
 import { TerminalTab } from './TerminalTab';
@@ -40,7 +40,7 @@ export function Console() {
 
   const info = useApp((s) => {
     const run = runId ? s.runs[runId] : undefined;
-    return run ? { attempt: run.attempt, status: run.status, source: run.source, title: s.tasks[run.taskId]?.title ?? '未命名任务' } : undefined;
+    return run ? { attempt: run.attempt, status: run.status, engineLabel: run.engineLabel, title: s.tasks[run.taskId]?.title ?? '未命名任务' } : undefined;
   }, shallow);
 
   const counts = useApp((s) => {
@@ -52,12 +52,9 @@ export function Console() {
 
   const eventCount = useApp((s) => (runId ? s.events.reduce((n, e) => (e.runId === runId ? n + 1 : n), 0) : 0));
 
-  // Newest event of this run, or a global one (connection changes) when that is more recent.
   const lastEvent = useApp((s): RunEvent | undefined => {
-    for (let i = s.events.length - 1; i >= 0; i--) {
-      const e = s.events[i];
-      if (!runId || !e.runId || e.runId === runId) return e;
-    }
+    if (!runId) return undefined;
+    for (let i = s.events.length - 1; i >= 0; i--) if (s.events[i].runId === runId) return s.events[i];
     return undefined;
   });
 
@@ -176,7 +173,7 @@ export function Console() {
             </>
           ) : <span>暂无事件</span>}
         </button>
-        {info && <SimTag source={info.source} compact />}
+        {info?.engineLabel && <EngineTag label={info.engineLabel} compact />}
       </div>
 
       {/* Open: resize handle, header, active tab. */}
@@ -192,7 +189,7 @@ export function Console() {
               <>
                 <StatusChip meta={RUN_STATUS[info.status]} size="sm" className="console__run-status" />
                 <span className="console__run-name truncate">{runLabel(info)} · {info.title}</span>
-                <SimTag source={info.source} />
+                {info.engineLabel && <EngineTag label={info.engineLabel} />}
               </>
             ) : <span className="console__run-name console__run-name--none">没有运行</span>}
           </div>

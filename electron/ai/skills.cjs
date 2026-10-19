@@ -90,6 +90,15 @@ function list() {
   const r = root();
   const { disabled } = readState();
   const skills = [];
+  // An import interrupted by a crash: put a replaced skill back, drop a half-copied one.
+  for (const e of fs.readdirSync(r, { withFileTypes: true })) {
+    if (!e.isDirectory()) continue;
+    const m = e.name.match(/^\.replaced-(.+)-[a-z0-9]+$/);
+    try {
+      if (m && !fs.existsSync(path.join(r, m[1]))) fs.renameSync(path.join(r, e.name), path.join(r, m[1]));
+      else if (m || e.name.startsWith('.importing-')) fs.rmSync(path.join(r, e.name), { recursive: true, force: true });
+    } catch { /* leave it for next time */ }
+  }
   for (const e of fs.readdirSync(r, { withFileTypes: true })) {
     if (!e.isDirectory() || e.name.startsWith('.')) continue;
     skills.push(describe(path.join(r, e.name), e.name, disabled));
@@ -140,10 +149,33 @@ function folderNameFor(src) {
    the page never hands us a path to copy from. */
 const pending = new Map();
 
+/** Copy into a hidden staging folder first and only then swap it in, so a source that has become
+    unreadable (or a copy that fails half-way) never costs the skill that was already installed. */
 function finishImport(src, name) {
-  const dest = path.join(root(), name);
-  if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
-  copyDir(src, dest);
+  const dir = root();
+  const dest = path.join(dir, name);
+  const tag = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const staging = path.join(dir, `.importing-${name}-${tag}`);
+  try {
+    if (!fs.existsSync(path.join(src, 'SKILL.md'))) throw new Error('来源文件夹里找不到 SKILL.md 了（可能被移动或删除）。');
+    scan(src);
+    copyDir(src, staging);
+    if (!fs.existsSync(path.join(staging, 'SKILL.md'))) throw new Error('复制后没有得到 SKILL.md。');
+  } catch (e) {
+    fs.rmSync(staging, { recursive: true, force: true });
+    throw new Error(`导入失败，原来的技能没有改动：${e.message}`);
+  }
+  const backup = path.join(dir, `.replaced-${name}-${tag}`);
+  const had = fs.existsSync(dest);
+  if (had) fs.renameSync(dest, backup);
+  try {
+    fs.renameSync(staging, dest);
+  } catch (e) {
+    if (had && !fs.existsSync(dest)) fs.renameSync(backup, dest);
+    fs.rmSync(staging, { recursive: true, force: true });
+    throw new Error(`导入失败，原来的技能没有改动：${e.message}`);
+  }
+  if (had) fs.rmSync(backup, { recursive: true, force: true });
   const { disabled } = readState();
   writeState({ disabled: disabled.filter((x) => x !== name) });
   return name;

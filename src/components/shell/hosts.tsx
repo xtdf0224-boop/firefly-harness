@@ -1,7 +1,7 @@
 /* 全局宿主：通知（Toast）、确认对话框、读屏播报区。
    Toast 本身不是 aria-live——播报统一由 LiveRegion 负责，避免同一条消息被读两遍。 */
 import {
-  Ban, CheckCircle2, CircleDot, Hand, Info, PauseCircle, RotateCcw, Trash2, TriangleAlert, X, XOctagon, type LucideIcon,
+  Ban, CheckCircle2, CircleDot, Eraser, Hand, Info, PauseCircle, Trash2, TriangleAlert, X, XOctagon, type LucideIcon,
 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent } from 'react';
 import { isOpenRun } from '../../lib/status';
@@ -90,7 +90,7 @@ function useLiftAboveComposer(hostRef: { current: HTMLElement | null }, active: 
     function measure() {
       if (!host) return;
       host.style.setProperty('--toast-lift', '0px'); // measure the resting position
-      const composer = document.querySelector<HTMLElement>('.ws-composer');
+      const composer = document.querySelector<HTMLElement>('.ws-composer-wrap');
       if (composer !== observed) {
         if (observed) ro?.unobserve(observed);
         if (composer) ro?.observe(composer);
@@ -186,21 +186,24 @@ function DeleteTaskDialog({ taskId }: { taskId: string }) {
   );
 }
 
-function ResetDemoDialog() {
+function ClearHistoryDialog() {
+  const tasks = useApp((s) => s.taskOrder.length);
+  const runs = useApp((s) => Object.keys(s.runs).length);
   return (
     <Dialog
-      title="重置演示数据？"
-      icon={RotateCcw}
-      tone="warning"
+      title="清除所有任务记录？"
+      icon={Eraser}
+      tone="danger"
       onClose={actions.closeDialog}
       footer={(
         <>
           <Button variant="secondary" data-autofocus onClick={actions.closeDialog}>取消</Button>
-          <Button variant="danger" icon={RotateCcw} onClick={actions.confirmDialog}>重置</Button>
+          <Button variant="danger" icon={Trash2} onClick={actions.confirmDialog}>全部清除</Button>
         </>
       )}
     >
-      <p>当前任务和运行记录会被清空，恢复为 3 个示例任务；设置会保留。</p>
+      <p className="shell-dialog-subject">{tasks} 个任务 · {runs} 条运行记录</p>
+      <p>所有任务、对话和运行记录都会删除，设置、模型接入和 Agent 配置会保留。正在进行的运行会先停止。</p>
     </Dialog>
   );
 }
@@ -211,7 +214,7 @@ export function DialogHost() {
   switch (dialog.kind) {
     case 'cancel-run': return <CancelRunDialog key={dialog.runId} runId={dialog.runId} />;
     case 'delete-task': return <DeleteTaskDialog key={dialog.taskId} taskId={dialog.taskId} />;
-    case 'reset-demo': return <ResetDemoDialog />;
+    case 'clear-history': return <ClearHistoryDialog />;
   }
 }
 

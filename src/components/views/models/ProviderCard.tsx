@@ -1,12 +1,14 @@
-/* One vendor on 模型接入: choose 「命令行登录」 or 「API 密钥」, set it up, test it.
+/* One vendor on 模型接入: choose 「命令行登录」 or 「API 密钥」, set it up, pick its model and 推理强度, test it.
    The key field is write-only — after saving, only its last four characters are ever shown. */
-import { CheckCircle2, ExternalLink, KeyRound, LogIn, Pencil, Plug, RefreshCw, Star, Terminal, Trash2, XCircle } from 'lucide-react';
-import { useId, useState, type FormEvent } from 'react';
-import { DRIVERS, readiness, regionOf, type ProviderInfo } from '../../../lib/providers';
-import type { AuthMode, DriverId, ProviderConfig } from '../../../lib/types';
-import { modelActions } from '../../../state/models';
+import { CheckCircle2, Cpu, ExternalLink, Gauge, KeyRound, Layers, LogIn, Pencil, Plug, RefreshCw, Star, Terminal, Trash2, XCircle } from 'lucide-react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import type { Effort } from '../../../lib/effort';
+import { DRIVERS, contextOf, ctxLabel, readiness, regionOf, type ProviderInfo } from '../../../lib/providers';
+import type { AuthMode, DriverId, ModelState, ProviderConfig } from '../../../lib/types';
+import { choiceEfforts, defaultChoice, effortMenu, modelActions, modelOptions } from '../../../state/models';
 import { useApp } from '../../../state/store';
 import { Badge, Button, CopyButton, Segmented, cx } from '../../ui';
+import { MenuSelect } from '../../ui/MenuSelect';
 
 const AUTH_OPTIONS: Array<{ value: AuthMode; label: string; icon: typeof Terminal; hint: string }> = [
   { value: 'cli', label: '命令行登录', icon: Terminal, hint: '用官方命令行工具（Claude Code、Codex…）登录账号后驱动它' },
@@ -20,7 +22,9 @@ function ago(at: number) {
 
 export function ProviderCard({ info, disabled }: { info: ProviderInfo; disabled: boolean }) {
   const cfg = useApp((s) => s.models.providers[info.id]);
-  const isDefault = useApp((s) => s.models.defaultEngine === info.id);
+  const models = useApp((s) => s.models);
+  // The vendor new tasks start with, as 「新建时默认使用」 shows it (the first ready one when none is set).
+  const isDefault = useApp((s) => defaultChoice(s.models)?.provider === info.id);
   const [busy, setBusy] = useState<'' | 'test' | 'detect'>('');
   const auth = cfg.auth;
   const ready = readiness(info, cfg, auth);
@@ -53,7 +57,9 @@ export function ProviderCard({ info, disabled }: { info: ProviderInfo; disabled:
         onChange={(v) => modelActions.set(info.id, { auth: v })} />
 
       <div className="model-card__body">
-        {auth === 'cli' ? <CliPane info={info} cfg={cfg} disabled={disabled} busy={busy === 'detect'} onDetect={() => run('detect')} /> : <ApiPane info={info} cfg={cfg} disabled={disabled} />}
+        {auth === 'cli'
+          ? <CliPane info={info} cfg={cfg} models={models} disabled={disabled} busy={busy === 'detect'} onDetect={() => run('detect')} />
+          : <ApiPane info={info} cfg={cfg} models={models} disabled={disabled} />}
       </div>
 
       <footer className="model-card__foot">
@@ -80,23 +86,26 @@ export function ProviderCard({ info, disabled }: { info: ProviderInfo; disabled:
 
 /* ───────────── 命令行 ───────────── */
 
-function CliPane({ info, cfg, disabled, busy, onDetect }: { info: ProviderInfo; cfg: ProviderConfig; disabled: boolean; busy: boolean; onDetect: () => void }) {
+function CliPane({ info, cfg, models, disabled, busy, onDetect }: { info: ProviderInfo; cfg: ProviderConfig; models: ModelState; disabled: boolean; busy: boolean; onDetect: () => void }) {
   const ids = useId();
   const d = DRIVERS[cfg.driver];
   const cli = cfg.cli;
-  // Codex lists the account's models itself; otherwise the catalog's suggestions.
-  const live = useApp((s) => s.models.live?.[cfg.driver]);
-  const cliModels = live?.length ? [{ id: '', note: '工具默认' }, ...live.map((m) => ({ id: m.id, note: m.note ?? m.label }))] : info.cliModels[cfg.driver] ?? [];
   const canLogin = d.auth === 'account' && (cfg.driver === 'claude-code' || cfg.driver === 'codex' || cfg.driver === 'kimi' || cfg.driver === 'mcode');
+
+  // Changing the tool resets the model to that tool's first suggestion (see modelActions.set), so the saved 强度 may no longer fit.
+  const onDriver = (driver: DriverId) => {
+    const model = info.cliModels[driver]?.[0]?.id ?? '';
+    modelActions.set(info.id, { driver, ...effortReset(models, cfg, 'cli', driver, model) });
+  };
+
   return (
     <div className="model-pane">
       {info.drivers.length > 1 ? (
         <div className="model-field">
           <label className="model-field__label" htmlFor={`${ids}-drv`}>命令行工具</label>
-          <select id={`${ids}-drv`} className="select" value={cfg.driver} disabled={disabled}
-            onChange={(e) => modelActions.set(info.id, { driver: e.target.value as DriverId })}>
-            {info.drivers.map((id) => <option key={id} value={id}>{DRIVERS[id].label}{DRIVERS[id].auth === 'account' ? '（账号登录）' : '（用 API Key）'}</option>)}
-          </select>
+          <MenuSelect<DriverId> variant="field" id={`${ids}-drv`} label="命令行工具" icon={Terminal} value={cfg.driver} disabled={disabled}
+            options={info.drivers.map((id) => ({ value: id, label: DRIVERS[id].label, sub: DRIVERS[id].auth === 'account' ? '用账号登录' : '用这家的 API Key' }))}
+            onChange={onDriver} />
         </div>
       ) : (
         <p className="model-pane__driver"><Terminal size={14} aria-hidden /><strong>{d.label}</strong><span>{d.auth === 'account' ? '账号登录' : '用 API Key'}</span></p>
@@ -131,12 +140,8 @@ function CliPane({ info, cfg, disabled, busy, onDetect }: { info: ProviderInfo; 
 
       {d.auth === 'key' && <KeyField info={info} cfg={cfg} disabled={disabled} />}
 
-      <div className="model-field">
-        <label className="model-field__label" htmlFor={`${ids}-m`}>模型<span className="model-field__opt">（留空用工具默认）</span></label>
-        <input id={`${ids}-m`} className="input mono" list={`${ids}-ml`} value={cfg.cliModel} disabled={disabled} spellCheck={false} autoComplete="off"
-          placeholder={cliModels[0]?.note ?? '默认'} onChange={(e) => modelActions.set(info.id, { cliModel: e.target.value.trim() })} />
-        <datalist id={`${ids}-ml`}>{cliModels.filter((m) => m.id).map((m) => <option key={m.id} value={m.id}>{m.note}</option>)}</datalist>
-      </div>
+      <ModelField info={info} cfg={cfg} models={models} auth="cli" disabled={disabled} />
+      <EffortField info={info} cfg={cfg} models={models} auth="cli" disabled={disabled} />
 
       <details className="model-adv">
         <summary>高级</summary>
@@ -148,11 +153,13 @@ function CliPane({ info, cfg, disabled, busy, onDetect }: { info: ProviderInfo; 
         {cfg.driver === 'codex' && (
           <div className="model-field">
             <label className="model-field__label" htmlFor={`${ids}-sb`}>Codex 沙箱</label>
-            <select id={`${ids}-sb`} className="select" value={cfg.codexSandbox ?? 'workspace-write'} disabled={disabled}
-              onChange={(e) => modelActions.set(info.id, { codexSandbox: e.target.value as ProviderConfig['codexSandbox'] })}>
-              <option value="workspace-write">工作文件夹内可写（推荐）</option>
-              <option value="danger-full-access">不使用沙箱（Windows 沙箱起不来时才用，Codex 可以在整台电脑上执行命令）</option>
-            </select>
+            <MenuSelect<NonNullable<ProviderConfig['codexSandbox']>> variant="field" id={`${ids}-sb`} label="Codex 沙箱" value={cfg.codexSandbox ?? 'workspace-write'} disabled={disabled}
+              options={[
+                { value: 'workspace-write', label: '工作文件夹内可写', sub: '推荐' },
+                { value: 'danger-full-access', label: '不使用沙箱', sub: 'Windows 沙箱起不来时才用' },
+              ]}
+              onChange={(v) => modelActions.set(info.id, { codexSandbox: v })} />
+            {cfg.codexSandbox === 'danger-full-access' && <p className="model-field__hint model-field__hint--warn">不使用沙箱时，Codex 可以在整台电脑上执行命令。</p>}
           </div>
         )}
       </details>
@@ -162,25 +169,21 @@ function CliPane({ info, cfg, disabled, busy, onDetect }: { info: ProviderInfo; 
 
 /* ───────────── API ───────────── */
 
-function ApiPane({ info, cfg, disabled }: { info: ProviderInfo; cfg: ProviderConfig; disabled: boolean }) {
+function ApiPane({ info, cfg, models, disabled }: { info: ProviderInfo; cfg: ProviderConfig; models: ModelState; disabled: boolean }) {
   const ids = useId();
   const region = regionOf(info, cfg);
   return (
     <div className="model-pane">
       {info.regions.length > 1 && (
         <div className="model-field">
-          <span className="model-field__label" id={`${ids}-r`}>服务地区</span>
+          <span className="model-field__label">服务地区</span>
           <Segmented<string> size="sm" label="服务地区" options={info.regions.map((r) => ({ value: r.id, label: r.label }))} value={cfg.region}
             onChange={(v) => modelActions.set(info.id, { region: v })} />
         </div>
       )}
       <KeyField info={info} cfg={cfg} disabled={disabled} />
-      <div className="model-field">
-        <label className="model-field__label" htmlFor={`${ids}-m`}>模型</label>
-        <input id={`${ids}-m`} className="input mono" list={`${ids}-ml`} value={cfg.model} disabled={disabled} spellCheck={false} autoComplete="off"
-          onChange={(e) => modelActions.set(info.id, { model: e.target.value.trim() })} />
-        <datalist id={`${ids}-ml`}>{info.models.map((m) => <option key={m.id} value={m.id}>{m.note}</option>)}</datalist>
-      </div>
+      <ModelField info={info} cfg={cfg} models={models} auth="api" disabled={disabled} />
+      <EffortField info={info} cfg={cfg} models={models} auth="api" disabled={disabled} />
       <details className="model-adv">
         <summary>高级</summary>
         <div className="model-field">
@@ -189,6 +192,107 @@ function ApiPane({ info, cfg, disabled }: { info: ProviderInfo; cfg: ProviderCon
             placeholder={region.baseUrl} onChange={(e) => modelActions.set(info.id, { baseUrl: e.target.value.trim() })} />
         </div>
       </details>
+    </div>
+  );
+}
+
+/* ───────────── 模型 / 推理强度 ───────────── */
+
+/** Value of the 「自定义模型…」 entry; never a real model id. */
+const CUSTOM = '__custom__';
+
+/** The change that drops the saved 推理强度 when the new model (or tool) does not offer it. */
+function effortReset(models: ModelState, cfg: ProviderConfig, auth: AuthMode, driver: DriverId | undefined, model: string): Partial<Pick<ProviderConfig, 'effort' | 'cliEffort'>> {
+  const saved = auth === 'api' ? cfg.effort : cfg.cliEffort;
+  if (!saved || choiceEfforts(models, { provider: cfg.id, auth, driver }, model).includes(saved)) return {};
+  return auth === 'api' ? { effort: undefined } : { cliEffort: undefined };
+}
+
+/** What the model's context window is, for the line under the model menu. */
+function contextNote(info: ProviderInfo, model: string, tool?: string) {
+  if (!model) return tool ? { text: `${tool} 自己选模型，上下文窗口随模型而定` } : undefined;
+  const ctx = contextOf(info, model);
+  return ctx.known ? { text: ctxLabel(ctx.tokens), known: true } : { text: '没有收录这个模型的上下文窗口，按 1M 估算' };
+}
+
+/** 模型: the catalog (or the CLI's own list) as a menu, with 「自定义模型…」 for any other id. */
+function ModelField({ info, cfg, models, auth, disabled }: { info: ProviderInfo; cfg: ProviderConfig; models: ModelState; auth: AuthMode; disabled: boolean }) {
+  const ids = useId();
+  const api = auth === 'api';
+  const current = api ? cfg.model : cfg.cliModel;
+  const driver = api ? undefined : cfg.driver;
+  const [custom, setCustom] = useState(false);
+  const [draft, setDraft] = useState('');
+  const input = useRef<HTMLInputElement>(null);
+  const closed = useRef(false);
+
+  useEffect(() => { if (custom) input.current?.focus(); }, [custom]);
+
+  // The id typed earlier stays in the list (modelOptions adds it) so it is visible as the current value.
+  const options = [
+    ...modelOptions(models, { provider: info.id, auth, driver }).map((o) => ({ value: o.id, label: o.label, sub: o.id && o.id !== o.label ? o.id : undefined, meta: o.note })),
+    { value: CUSTOM, label: '自定义模型…', sub: '输入这家支持的任意模型 ID', icon: Pencil },
+  ];
+
+  const commit = (next: string) => {
+    if (next === current) return;
+    modelActions.set(info.id, { ...(api ? { model: next } : { cliModel: next }), ...effortReset(models, cfg, auth, driver, next) });
+  };
+  const choose = (v: string) => {
+    if (v === CUSTOM) { closed.current = false; setDraft(current); setCustom(true); return; }
+    setCustom(false);
+    commit(v);
+  };
+  // Enter or leaving the box keeps what was typed; Escape drops it. An API model cannot be empty.
+  const finish = (keep: boolean) => {
+    if (closed.current) return;
+    closed.current = true;
+    setCustom(false);
+    const next = draft.trim();
+    if (keep && (next || !api)) commit(next);
+  };
+
+  const note = contextNote(info, current, api ? undefined : DRIVERS[cfg.driver].label);
+  return (
+    <div className="model-field">
+      <label className="model-field__label" htmlFor={`${ids}-m`}>模型{!api && <span className="model-field__opt">（不选就用工具默认）</span>}</label>
+      <MenuSelect variant="field" id={`${ids}-m`} label="模型" icon={Cpu} value={custom ? CUSTOM : current} options={options} onChange={choose} disabled={disabled} minWidth={320} />
+      {custom && (
+        <input ref={input} className="input mono" aria-label="自定义模型 ID" value={draft} spellCheck={false} autoComplete="off" placeholder={`例如 ${info.models[0].id}`}
+          onChange={(e) => setDraft(e.target.value)} onBlur={() => finish(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+          }} />
+      )}
+      {custom
+        ? <p className="model-field__hint">输入模型 ID，按回车保存；按 Esc 放弃。</p>
+        : note && <p className={cx('model-field__meta', note.known && 'is-known')}><Layers size={13} aria-hidden />{note.text}</p>}
+    </div>
+  );
+}
+
+/** 推理强度: the levels this model (or tool) offers, saved as the default for new tasks on this way. */
+function EffortField({ info, cfg, models, auth, disabled }: { info: ProviderInfo; cfg: ProviderConfig; models: ModelState; auth: AuthMode; disabled: boolean }) {
+  const ids = useId();
+  const api = auth === 'api';
+  const levels = choiceEfforts(models, { provider: info.id, auth, driver: api ? undefined : cfg.driver }, api ? cfg.model : cfg.cliModel);
+  const saved = api ? cfg.effort : cfg.cliEffort;
+  const value = saved && levels.includes(saved) ? saved : '';
+  const set = (v: string) => {
+    const effort = (v || undefined) as Effort | undefined;
+    modelActions.set(info.id, api ? { effort } : { cliEffort: effort });
+  };
+  const caption = <>推理强度<span className="model-field__opt">（新建任务时的默认值）</span></>;
+  return levels.length > 0 ? (
+    <div className="model-field">
+      <label className="model-field__label" htmlFor={`${ids}-e`}>{caption}</label>
+      <MenuSelect variant="field" id={`${ids}-e`} label="推理强度" icon={Gauge} value={value} options={effortMenu(levels)} onChange={set} disabled={disabled} minWidth={260} />
+    </div>
+  ) : (
+    <div className="model-field">
+      <span className="model-field__label">{caption}</span>
+      <p className="model-field__static"><Gauge size={14} aria-hidden />这个模型不能调节推理强度</p>
     </div>
   );
 }

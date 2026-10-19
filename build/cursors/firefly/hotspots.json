@@ -1,0 +1,26 @@
+{
+  "default": [
+    4,
+    3
+  ],
+  "pointer": [
+    4,
+    3
+  ],
+  "text": [
+    16,
+    16
+  ],
+  "not-allowed": [
+    4,
+    3
+  ],
+  "ns-resize": [
+    16,
+    16
+  ],
+  "progress": [
+    4,
+    3
+  ]
+}

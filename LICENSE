@@ -22,4 +22,6 @@ SOFTWARE.
 
 This license applies to the source code only. Third-party assets bundled with
 the app (the wallpapers in public/wallpapers and the boot clips in public/boot)
-are NOT covered by this license; see DISCLAIMER.md.
+and the character fan art (the installer art in build/installer and the theme
+cursors in build/cursors, also inlined in src/styles/cursors.css) are NOT
+covered by this license; see DISCLAIMER.md.

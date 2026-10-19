@@ -1,12 +1,12 @@
 /* Everything a component can do. Each run control goes through `backend` and then gives visible
    feedback (toast + screen-reader announcement), whether it succeeded or not. */
 import type {
-  AgentId, ConsoleTab, Dialog, ScenarioId, Settings, Task, TaskEngine, TaskKind, ToolId, ToolPermission, Toast, UiCommand, ViewId, WorkspaceTab,
+  AgentEngine, AgentId, ConsoleTab, Dialog, Settings, Task, TaskEngine, TaskKind, ToolId, ToolPermission, Toast, UiCommand, ViewId, WorkspaceTab,
 } from '../lib/types';
 import { backend } from './backend';
-import { announce, dropToasts, findApproval, pushEvent, toast as pushToast } from './engine';
+import { announce, dropToasts, pushEvent, toast as pushToast } from './engine';
 import { forgetTask, reply } from './live';
-import { seededState, syncPersonaAgent } from './seed';
+import { syncPersonaAgent } from './seed';
 import { store, uid } from './store';
 
 type ToastInput = Omit<Toast, 'id' | 'createdAt' | 'ttl'> & { ttl?: number };
@@ -18,9 +18,12 @@ function feedback(t: ToastInput, spoken?: string) {
   });
 }
 
+const NO_MODEL: ToastInput = {
+  tone: 'warning', title: '还没有选择模型', body: '先到「模型接入」连接一个模型，再回来给任务选上它。',
+  action: { label: '去模型接入', command: { type: 'navigate', view: 'models' } },
+};
+
 const runOf = (runId: string) => store.get().runs[runId];
-/** 「（模拟运行）」 for simulator runs; real runs say nothing extra. */
-const sim = (runId?: string) => (runId && runOf(runId)?.source === 'live' ? '' : '（模拟运行）');
 const orchestratorName = () => store.get().agents.find((a) => a.id === 'orchestrator')?.name ?? '编排 Agent';
 const taskOfRun = (runId: string) => store.get().tasks[runOf(runId)?.taskId ?? ''];
 /** The status panel is a drawer below 1280px; docked above, where "open" has no meaning. */
@@ -72,7 +75,7 @@ export const actions = {
   },
 
   /* ── tasks ── */
-  createTask(input: { title: string; goal: string; kind?: TaskKind; engine?: TaskEngine; scenarioId: ScenarioId; agentIds: AgentId[]; start: boolean; skills?: string[] }): string {
+  createTask(input: { title: string; goal: string; kind?: TaskKind; engine?: TaskEngine; agentIds: AgentId[]; start: boolean; skills?: string[] }): string {
     const id = uid('task');
     const now = Date.now();
     const kind = input.kind ?? 'work';
@@ -80,9 +83,9 @@ export const actions = {
       const first = input.goal.trim();
       const task: Task = {
         id, title: input.title.trim() || (kind === 'chat' ? '闲聊' : '未命名任务'), goal: first, createdAt: now, updatedAt: now,
-        scenarioId: input.scenarioId, agentIds: input.agentIds.length ? input.agentIds : ['orchestrator'], runIds: [],
-        messages: first ? [{ id: uid('msg'), role: 'user', text: first, at: now, simulated: false }] : [],
-        source: input.engine ? 'live' : 'simulated', kind, engine: input.engine, skills: input.skills,
+        agentIds: input.agentIds.length ? input.agentIds : ['orchestrator'], runIds: [],
+        messages: first ? [{ id: uid('msg'), role: 'user', text: first, at: now }] : [],
+        kind, engine: input.engine, skills: input.skills,
       };
       d.tasks[id] = task;
       d.taskOrder.unshift(id);
@@ -92,29 +95,30 @@ export const actions = {
       d.workspaceTab = 'conversation';
       pushEvent(d, { kind: 'user', level: 'info', text: `${kind === 'chat' ? '新建闲聊' : '新建任务'}：${task.title}` });
     });
+    // The composer is disabled until a model is ready; this only catches a task whose model went away.
+    if (!input.engine) { feedback(NO_MODEL); return id; }
     if (kind === 'chat') {
       if (input.goal.trim()) void reply(id);
       return id;
     }
     if (input.start) {
       const r = backend.startRun(id);
-      if (r.ok) feedback({ tone: 'running', title: '任务已创建并开始运行', body: input.engine ? `${input.engine.label} 正在制定计划。` : '演示模式：由本地模拟器执行。' });
+      if (r.ok) feedback({ tone: 'running', title: '任务已创建并开始运行', body: `${input.engine.label} 正在制定计划。` });
       else feedback({ tone: 'warning', title: '任务已创建，但还没开始', body: r.error });
     } else {
       feedback({ tone: 'info', title: '任务已创建', body: '准备好后点「开始」。' });
     }
     return id;
   },
-  /** Switch the model a chat uses; the next reply starts a fresh conversation with it. */
-  setTaskEngine(taskId: string, engine: TaskEngine | undefined) {
+  /** Switch the model a task uses; the next reply starts a fresh conversation with it. */
+  setTaskEngine(taskId: string, engine: TaskEngine) {
     store.update((d) => {
       const t = d.tasks[taskId];
       if (!t) return;
-      t.source = engine ? 'live' : 'simulated';
-      const sameModel = engine && t.engine && engine.provider === t.engine.provider && engine.auth === t.engine.auth && engine.model === t.engine.model;
+      const sameModel = t.engine && engine.provider === t.engine.provider && engine.auth === t.engine.auth && engine.driver === t.engine.driver && engine.model === t.engine.model;
       t.engine = engine;
       if (!sameModel) t.session = undefined;
-      t.messages.push({ id: uid('msg'), role: 'system', text: `已切换到 ${engine ? engine.label : '演示模式'}。`, at: Date.now(), simulated: !engine });
+      t.messages.push({ id: uid('msg'), role: 'system', text: `已切换到 ${engine.label}。`, at: Date.now() });
     });
   },
   requestDeleteTask(taskId: string) {
@@ -127,7 +131,7 @@ export const actions = {
     forgetTask(taskId);
     store.update((d) => {
       const gone = new Set(task.runIds);
-      // Toasts about this task (approval, failure, completion, reconnect) would be left with dead actions.
+      // Toasts about this task (approval, failure, completion) would be left with dead actions.
       for (const runId of task.runIds) {
         dropToasts(d, `run:${runId}`);
         for (const a of d.runs[runId]?.approvals ?? []) dropToasts(d, `approval:${a.id}`);
@@ -153,17 +157,17 @@ export const actions = {
     const r = backend.startRun(taskId);
     if (r.ok) {
       store.update((d) => { d.selectedRunId = undefined; });
-      feedback({ tone: 'running', title: '开始运行', body: `${orchestratorName()} 正在制定计划。${sim(r.value)}` });
+      feedback({ tone: 'running', title: '开始运行', body: `${orchestratorName()} 正在制定计划。` });
     } else feedback({ tone: 'danger', title: '无法开始', body: r.error });
   },
   pauseRun(runId: string) {
     const r = backend.pauseRun(runId);
-    if (r.ok) feedback({ tone: 'paused', title: '已暂停', body: runOf(runId)?.source === 'live' ? '当前调用已中断，点「继续」会重新执行这一步。' : '当前步骤停在原处，点「继续」即可恢复。（模拟运行）' });
+    if (r.ok) feedback({ tone: 'paused', title: '已暂停', body: '当前调用已中断，点「继续」会重新执行这一步。' });
     else feedback({ tone: 'warning', title: '无法暂停', body: r.error });
   },
   resumeRun(runId: string) {
     const r = backend.resumeRun(runId);
-    if (r.ok) feedback({ tone: 'running', title: '已继续', body: runOf(runId)?.status === 'awaiting' ? `还有待确认的操作，处理后才会往下执行。${sim(runId)}` : `从暂停处继续执行。${sim(runId)}` });
+    if (r.ok) feedback({ tone: 'running', title: '已继续', body: runOf(runId)?.status === 'awaiting' ? '还有待确认的操作，处理后才会往下执行。' : '从暂停处继续执行。' });
     else feedback({ tone: 'danger', title: '无法继续', body: r.error });
   },
   requestCancel(runId: string) {
@@ -172,7 +176,7 @@ export const actions = {
   },
   cancelRun(runId: string) {
     const r = backend.cancelRun(runId);
-    if (r.ok) feedback({ tone: 'neutral', title: '已取消运行', body: `未完成的步骤已停止，已生成的产物仍然保留。${sim(runId)}` });
+    if (r.ok) feedback({ tone: 'neutral', title: '已取消运行', body: '未完成的步骤已停止，已生成的产物仍然保留。' });
     else feedback({ tone: 'warning', title: '无法取消', body: r.error });
   },
   retryRun(runId: string, mode: 'resume' | 'restart' = 'resume') {
@@ -183,54 +187,32 @@ export const actions = {
       // Describe the run that was actually created, not the one it replaces.
       const next = runOf(r.value);
       const cancelled = prev?.status === 'cancelled';
-      const resumeAt = next?.planReady ? next.plan[next.cursor.step] : undefined;
       const carried = next ? next.plan.filter((st) => st.carried).length : 0;
-      const note = sim(r.value);
       if (mode === 'restart') {
-        feedback({ tone: 'running', title: '已从头重新运行', body: `所有步骤会重新执行。${note}` });
+        feedback({ tone: 'running', title: '已从头重新运行', body: '所有步骤会重新执行。' });
       } else if (!next?.planReady) {
-        feedback({ tone: 'running', title: cancelled ? '已继续运行' : '已开始重试', body: `上次在计划完成前结束，会重新制定计划。${note}` });
+        feedback({ tone: 'running', title: cancelled ? '已继续运行' : '已开始重试', body: '上次在计划完成前结束，会重新制定计划。' });
       } else {
-        const firstOpen = next.plan.find((st) => !st.carried && st.status !== 'done');
-        const at = next.source === 'live' ? firstOpen : resumeAt;
+        const at = next.plan.find((st) => !st.carried && st.status !== 'done');
         feedback({ tone: 'running', title: cancelled ? '已继续未完成的步骤' : '已开始重试',
           body: at
-            ? `从第 ${at.index + 1} 步「${at.title}」继续${carried > 0 ? `，前 ${carried} 步沿用上次结果` : ''}。${note}`
-            : `前面的步骤都已完成，直接汇总。${note}` });
+            ? `从第 ${at.index + 1} 步「${at.title}」继续${carried > 0 ? `，前 ${carried} 步沿用上次结果` : ''}。`
+            : '前面的步骤都已完成，直接汇总。' });
       }
     } else feedback({ tone: 'danger', title: '无法重试', body: r.error });
   },
   decideApproval(approvalId: string, decision: 'approve' | 'reject') {
-    const owner = findApproval(store.get(), approvalId)?.run;
     const r = backend.decideApproval(approvalId, decision);
     if (!r.ok) return feedback({ tone: 'warning', title: '无法处理', body: r.error });
-    // A decision can be recorded while the run is paused; nothing runs until it is resumed.
-    const after = owner ? runOf(owner.id) : undefined;
-    const paused = after?.status === 'paused';
-    const resumeHint = paused
-      ? (after.pauseReason === 'disconnected' ? '连接恢复后点「继续」' : '点「继续」')
-      : '';
-    const real = owner?.source === 'live';
-    if (decision === 'approve') {
-      feedback(real
-        ? { tone: 'success', title: '已批准', body: 'Agent 会执行这项操作。', ttl: 3000 }
-        : paused
-          ? { tone: 'info', title: '已记录批准', body: `运行仍处于暂停，${resumeHint}后才会执行。（模拟运行）`, ttl: 5000 }
-          : { tone: 'success', title: '已批准', body: '模拟器继续往下执行，不会真的写文件或运行命令。', ttl: 3000 });
-    } else {
-      feedback(real
-        ? { tone: 'neutral', title: '已拒绝', body: '这项操作不会执行，Agent 会换一种做法或向你说明。', ttl: 3500 }
-        : { tone: 'neutral', title: '已拒绝',
-          body: paused ? `这项操作不会执行（模拟），对应步骤已跳过；运行仍处于暂停，${resumeHint}后继续后面的步骤。` : '这项操作不会执行（模拟），对应步骤已跳过。',
-          ttl: paused ? 5000 : 3500 });
-    }
+    if (decision === 'approve') feedback({ tone: 'success', title: '已批准', body: 'Agent 会执行这项操作。', ttl: 3000 });
+    else feedback({ tone: 'neutral', title: '已拒绝', body: '这项操作不会执行，Agent 会换一种做法或向你说明。', ttl: 3500 });
   },
   sendMessage(taskId: string, text: string) {
     const r = backend.sendMessage(taskId, text.trim());
     if (!r.ok) feedback({ tone: 'danger', title: '发送失败', body: r.error });
   },
 
-  /* ── agents, tools, connections ── */
+  /* ── agents and tools ── */
   setToolPermission(toolId: ToolId, permission: ToolPermission) {
     store.update((d) => {
       const tool = d.tools.find((t) => t.id === toolId);
@@ -245,17 +227,17 @@ export const actions = {
     const agent = store.get().agents.find((a) => a.id === agentId);
     feedback({ tone: 'info', title: enabled ? 'Agent 已启用' : 'Agent 已停用', body: enabled ? `新任务可以选择「${agent?.name}」。` : `新任务中它的步骤会交给编排 Agent。` });
   },
-  setAgentModel(agentId: AgentId, model: string) {
-    store.update((d) => { const a = d.agents.find((x) => x.id === agentId); if (a) a.model = model; });
+  /** Give an agent its own model, or (undefined) let it follow the task's. The 编排 Agent always follows the task. */
+  setAgentEngine(agentId: AgentId, engine: AgentEngine | undefined) {
+    if (agentId === 'orchestrator') return feedback({ tone: 'info', title: '编排 Agent 用任务的模型', body: '它负责拆解和汇总，跟着任务选的模型走。' });
+    store.update((d) => { const a = d.agents.find((x) => x.id === agentId); if (a) a.engine = engine; });
   },
-  simulateDisconnect(connectionId: string) {
-    const r = backend.simulateDisconnect?.(connectionId);
-    if (r && !r.ok) feedback({ tone: 'warning', title: '无法模拟断开', body: r.error });
-  },
-  reconnect(connectionId: string) {
-    backend.reconnect(connectionId);
-    const c = store.get().connections.find((x) => x.id === connectionId);
-    if (c) store.update((d) => announce(d, `正在重连${c.name}（模拟）`));
+  /** Tools an agent may use when its steps run on a command-line agent. */
+  setAgentTools(agentId: AgentId, tools: ToolId[]) {
+    store.update((d) => {
+      const a = d.agents.find((x) => x.id === agentId);
+      if (a) a.tools = d.tools.map((t) => t.id).filter((id) => tools.includes(id));
+    });
   },
 
   /* ── settings ── */
@@ -265,21 +247,25 @@ export const actions = {
       if (key === 'mode' || key === 'persona') syncPersonaAgent(d);
     });
   },
-  resetDemo() {
+  /** Delete every task, run and event; settings, model access, agents and tool policies stay. */
+  clearHistory() {
+    const count = store.get().taskOrder.length;
     for (const id of Object.keys(store.get().tasks)) forgetTask(id);
-    const s = store.get();
-    // Only tasks and runs are reset: the user stays on the page they pressed the button on, and keeps
-    // their settings, tool policies, agent settings and layout. The selected task no longer exists.
-    store.replace({
-      ...seededState(Date.now(), s.settings),
-      view: s.view === 'task' ? 'tasks' : s.view,
-      tools: s.tools,
-      agents: s.agents,
-      console: s.console,
-      navCollapsed: s.navCollapsed,
-      statusDrawerOpen: s.statusDrawerOpen,
+    store.update((d) => {
+      d.tasks = {};
+      d.taskOrder = [];
+      d.runs = {};
+      d.events = [];
+      d.selectedTaskId = undefined;
+      d.selectedRunId = undefined;
+      d.celebration = undefined;
+      d.console.focusId = undefined;
+      d.focusRequest = undefined;
+      // What is left would point at tasks and runs that no longer exist.
+      d.toasts = d.toasts.filter((t) => !t.action || t.action.command.type === 'navigate');
+      if (d.view === 'task') d.view = 'tasks';
     });
-    feedback({ tone: 'info', title: '演示数据已重置', body: '已恢复 3 个示例任务。' });
+    feedback({ tone: 'neutral', title: '任务记录已清除', body: `${count} 个任务及其运行记录已移除，设置、模型接入、Agent 和工具策略都还在。` });
   },
 
   /* ── console ── */
@@ -313,7 +299,7 @@ export const actions = {
     if (!dialog) return;
     if (dialog.kind === 'cancel-run') actions.cancelRun(dialog.runId);
     else if (dialog.kind === 'delete-task') actions.deleteTask(dialog.taskId);
-    else if (dialog.kind === 'reset-demo') actions.resetDemo();
+    else if (dialog.kind === 'clear-history') actions.clearHistory();
   },
   clearCelebration() {
     store.update((d) => { d.celebration = undefined; });
@@ -337,7 +323,6 @@ export const actions = {
       case 'retry-run': return actions.retryRun(cmd.runId, cmd.mode);
       case 'show-approvals': return actions.requestFocus('approvals');
       case 'navigate': return actions.navigate(cmd.view);
-      case 'reconnect': return actions.reconnect(cmd.connectionId);
     }
   },
 };

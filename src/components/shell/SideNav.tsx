@@ -1,19 +1,18 @@
-/* 左侧导航：品牌与演示模式标记、新建任务、主导航、最近任务、视觉模式切换与收起。
+/* 左侧导航：品牌与模型接入入口、新建任务、主导航、最近任务、视觉模式切换与收起。
    紧凑态（手动收起，或视口 < 960px）只显示图标；< 640px 时变成顶部横条（见 shell.css）。 */
 import {
-  Bot, Circle, Cpu, Eye, FlaskConical, History, ListTodo, MessageCircle, PanelLeftClose, PanelLeftOpen, PanelRight, Plug, Plus, Settings, Shield, Sparkles, type LucideIcon,
+  Bot, Circle, Cpu, Eye, History, ListTodo, MessageCircle, PanelLeftClose, PanelLeftOpen, PanelRight, Plus, Settings, Shield, Sparkles, Wrench, type LucideIcon,
 } from 'lucide-react';
-import { useCallback, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import type { ReactNode } from 'react';
 import { useMedia } from '../../lib/hooks';
 import { RUN_STATUS, type StatusMeta } from '../../lib/status';
 import type { ViewId, VisualMode } from '../../lib/types';
 import { actions } from '../../state/actions';
-import { readiness, PROVIDERS } from '../../lib/providers';
+import { engineChoices } from '../../state/models';
 import { openRuns, pendingApprovals, taskStatus } from '../../state/selectors';
 import { shallow, useApp } from '../../state/store';
 import { WingMark } from '../decor/WingMark';
-import { Badge, Button, Dialog, IconButton, Segmented, cx } from '../ui';
+import { Badge, Button, IconButton, Segmented, cx } from '../ui';
 import { COMPACT_QUERY, DRAWER_QUERY } from './queries';
 
 interface NavEntry { view: ViewId; label: string; icon: LucideIcon; key: string }
@@ -21,7 +20,7 @@ interface NavEntry { view: ViewId; label: string; icon: LucideIcon; key: string 
 const NAV_ENTRIES: NavEntry[] = [
   { view: 'tasks',    label: '任务列表',   icon: ListTodo, key: '2' },
   { view: 'agents',   label: 'Agent',      icon: Bot,      key: '3' },
-  { view: 'tools',    label: '工具与连接', icon: Plug,     key: '4' },
+  { view: 'tools',    label: '工具与技能', icon: Wrench,     key: '4' },
   { view: 'models',   label: '模型接入',   icon: Cpu,      key: '5' },
   { view: 'history',  label: '运行历史',   icon: History,  key: '6' },
   { view: 'settings', label: '设置',       icon: Settings, key: '7' },
@@ -94,29 +93,24 @@ function RecentTasks({ ids }: { ids: string[] }) {
   );
 }
 
-/** 演示模式说明。渲染到 body：面板自带 backdrop-filter，会把 position: fixed 的遮罩限制在导航栏内。 */
-function DemoDialog({ onClose }: { onClose: () => void }) {
-  return createPortal(
-    <Dialog
-      title="演示模式"
-      icon={FlaskConical}
-      tone="warning"
-      onClose={onClose}
-      footer={(
-        <>
-          <Button variant="secondary" data-autofocus onClick={onClose}>知道了</Button>
-          <Button variant="primary" icon={Cpu} onClick={() => { onClose(); actions.navigate('models'); }}>前往模型接入</Button>
-        </>
-      )}
+/** 品牌行右侧的入口：已接入几个，或提醒还没有接入。两种情况都直接跳到「模型接入」。 */
+function ModelsChip() {
+  const choices = useApp((s) => engineChoices(s.models).map((c) => c.label), shallow);
+  const count = choices.length;
+  const names = choices.length > 4 ? `${choices.slice(0, 4).join('、')} 等` : choices.join('、');
+  return (
+    <button
+      type="button"
+      className={cx('side-nav__models', count === 0 && 'is-empty')}
+      title={count > 0 ? `已接入 ${count} 个：${names}` : '还没有接入模型，点这里去接入'}
+      onClick={() => actions.navigate('models')}
     >
-      <p>还没有接入模型，闲聊和工作都由内置的模拟器演示。</p>
-      <ul className="shell-dialog-list">
-        <li>Agent 回复、工具调用、终端输出、Token 统计与连接状态都是模拟数据。</li>
-        <li>示例任务标记为「示例数据」。</li>
-        <li>在「模型接入」里用命令行登录或 API 密钥接入 Claude、GPT、DeepSeek、Kimi、Qwen、GLM、MiniMax、豆包（需要桌面版）。</li>
-      </ul>
-    </Dialog>,
-    document.body,
+      <Cpu size={12} aria-hidden />
+      {/* In the icon rail only the short part is drawn; the rest stays in the accessible name. */}
+      {count > 0
+        ? <span className="side-nav__models-text">{count}<span className="side-nav__models-more"> 个模型接入</span></span>
+        : <span className="side-nav__models-text">未接入<span className="side-nav__models-more">模型</span></span>}
+    </button>
   );
 }
 
@@ -126,16 +120,12 @@ export function SideNav() {
   const mode = useApp((s) => s.settings.mode);
   const wallpaperOn = useApp((s) => s.settings.wallpaper);
   const openCount = useApp((s) => openRuns(s).length);
-  const connIssue = useApp((s) => s.connections.some((c) => c.status === 'disconnected' || c.status === 'reconnecting'));
   const recentIds = useApp((s) => s.taskOrder.slice(0, 5), shallow);
   const pending = useApp((s) => pendingApprovals(s).length);
   const narrow = useMedia(COMPACT_QUERY);
   // Below 1280px the status panel is a drawer; every view needs a way to open it, not just the workspace header.
   const drawerMode = useMedia(DRAWER_QUERY);
   const compact = collapsed || narrow;
-  const [demoOpen, setDemoOpen] = useState(false);
-  const liveCount = useApp((s) => PROVIDERS.filter((p) => readiness(p, s.models.providers[p.id], s.models.providers[p.id].auth).ready).length);
-  const closeDemo = useCallback(() => setDemoOpen(false), []);
 
   const nextMode: VisualMode = mode === 'sam' ? 'firefly' : 'sam';
 
@@ -150,29 +140,7 @@ export function SideNav() {
               <span className="label side-nav__sub">Agent 工作台</span>
             </div>
           </div>
-          {liveCount > 0 ? (
-            <button
-              type="button"
-              className="side-nav__demo side-nav__demo--live"
-              title={`已接入 ${liveCount} 个模型（演示任务仍由模拟器执行）`}
-              onClick={() => actions.navigate('models')}
-            >
-              <Cpu size={12} aria-hidden />
-              <span className="side-nav__demo-text">{liveCount}<span className="side-nav__demo-more"> 个模型</span></span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="side-nav__demo"
-              aria-haspopup="dialog"
-              title="演示模式：还没有接入模型，任务使用模拟数据"
-              onClick={() => setDemoOpen(true)}
-            >
-              <FlaskConical size={12} aria-hidden />
-              {/* In the icon rail only 「演示」 is drawn; 「模式」 stays in the accessible name. */}
-              <span className="side-nav__demo-text">演示<span className="side-nav__demo-more">模式</span></span>
-            </button>
-          )}
+          <ModelsChip />
         </div>
         <Button
           variant="primary"
@@ -197,17 +165,6 @@ export function SideNav() {
                   active={view === 'tasks' || view === 'task'}
                   note={openCount > 0 ? `${openCount} 个进行中` : undefined}
                   badge={openCount > 0 && <Badge tone="running" className="side-nav__badge">{openCount}<span className="sr-only"> 个进行中</span></Badge>}
-                />
-              );
-            }
-            if (entry.view === 'tools') {
-              return (
-                <NavItem
-                  key={entry.view}
-                  entry={entry}
-                  active={view === 'tools'}
-                  note={connIssue ? '有连接断开' : undefined}
-                  badge={connIssue && <Badge tone="danger" className="side-nav__badge"><span aria-hidden>!</span><span className="sr-only">有连接断开</span></Badge>}
                 />
               );
             }
@@ -263,8 +220,6 @@ export function SideNav() {
           />
         )}
       </div>
-
-      {demoOpen && <DemoDialog onClose={closeDemo} />}
     </nav>
   );
 }

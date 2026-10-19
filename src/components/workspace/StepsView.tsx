@@ -8,7 +8,7 @@ import { actions } from '../../state/actions';
 import { shallow, useApp } from '../../state/store';
 import { ToolCallItem } from '../console/ToolCallItem';
 import { ApprovalCard } from '../shell/ApprovalCard';
-import { AgentAvatar, EmptyState, StatusChip } from '../ui';
+import { AgentAvatar, EmptyState, EngineTag, StatusChip } from '../ui';
 import { RUN_ENDED, RUN_OPEN, stepCounts, stepDuration, stepMeta } from './shared';
 
 export interface StepTarget { id: string; n: number }
@@ -26,7 +26,7 @@ export function StepsView({ runId, target, onHandled }: StepsViewProps) {
     const r = runId ? s.runs[runId] : undefined;
     return r ? {
       plan: r.plan, planReady: r.planReady, status: r.status, toolCalls: r.toolCalls, approvals: r.approvals,
-      retryOf: r.retryOf, live: r.live, source: r.source,
+      retryOf: r.retryOf, live: r.live,
     } : undefined;
   }, shallow);
   const agents = useApp((s) => s.agents);
@@ -128,6 +128,7 @@ const StepCard = memo(function StepCard({ step, runStatus, toolCalls, approvals,
             {agent && (
               <span className="ws-step__agent"><AgentAvatar agent={agent} size="sm" />{agent.name}</span>
             )}
+            {step.engineLabel && <EngineTag label={step.engineLabel} />}
             {dur != null && <span>耗时 {duration(dur)}</span>}
           </p>
         </div>

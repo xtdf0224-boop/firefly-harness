@@ -4,9 +4,8 @@ import { Hand, Pause, Play, RefreshCw, RotateCcw, Square } from 'lucide-react';
 import { useId, type ReactNode } from 'react';
 import type { RunStatus } from '../../lib/types';
 import { actions } from '../../state/actions';
-import { gatewayUp } from '../../state/engine';
-import { useApp } from '../../state/store';
 import { Button } from '../ui';
+import { useTaskEngine } from './shared';
 
 export interface RunControlsProps {
   taskId: string;
@@ -16,13 +15,13 @@ export interface RunControlsProps {
 }
 
 export function RunControls({ taskId, runId, status }: RunControlsProps) {
-  const up = useApp(gatewayUp);
+  const { state } = useTaskEngine(taskId);
   const hintId = useId();
 
-  // Starting, resuming and retrying all need the model gateway; pausing and cancelling do not.
-  const needsGateway = !runId || status === 'paused' || status === 'failed' || status === 'cancelled' || status === 'completed';
-  const blocked = !up && needsGateway;
-  const gate = blocked ? { disabled: true, title: '模型网关未连接', 'aria-describedby': hintId } : {};
+  // Starting, resuming and retrying need a model that can run; pausing and cancelling do not.
+  const needsModel = !runId || status === 'paused' || status === 'failed' || status === 'cancelled' || status === 'completed';
+  const blocked = state !== 'ready' && needsModel;
+  const gate = blocked ? { disabled: true, title: '这个任务的模型现在不可用', 'aria-describedby': hintId } : {};
   const verb = !runId ? '开始' : status === 'paused' ? '继续' : '重试';
 
   let buttons: ReactNode;
@@ -83,7 +82,7 @@ export function RunControls({ taskId, runId, status }: RunControlsProps) {
   return (
     <div className="ws-controls" role="group" aria-label="运行控制">
       {buttons}
-      {blocked && <span className="ws-controls__hint" id={hintId}>模型网关未连接，恢复连接后才能{verb}。</span>}
+      {blocked && <span className="ws-controls__hint" id={hintId}>模型现在不可用，到「模型接入」处理后才能{verb}。</span>}
     </div>
   );
 }

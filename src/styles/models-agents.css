@@ -1,0 +1,110 @@
+/* 萤火 · models-agents.css
+   The parts of 模型接入 and the Agent page that are built on the menu select: the default-vendor row,
+   the model / 推理强度 fields on a vendor card, and the model picker, notes and tool toggles on an Agent
+   card. Tokens only; SAM (square corners, firefly green) is under :root[data-mode="sam"].
+   New class names on purpose: this file loads before views-live.css / views-config.css. */
+
+/* ───────────── 模型接入 · 新建时默认使用 ───────────── */
+.models-default__select { flex: 0 1 360px; min-width: 0; }
+.models-default__empty { font-size: var(--fs-sm); color: var(--text-2); }
+
+/* ───────────── 模型接入 · vendor card fields ───────────── */
+.model-field__hint--warn { color: var(--tone-warning); }
+
+/* One quiet line under the model menu: its context window. */
+.model-field__meta { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); line-height: 1.5; color: var(--text-3); }
+.model-field__meta svg { flex: none; }
+.model-field__meta.is-known { color: var(--text-2); }
+.model-field__meta.is-known svg { color: var(--mint); }
+
+/* 推理强度 when the model cannot be tuned: a flat, non-interactive stand-in for the menu. */
+.model-field__static {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 var(--sp-3);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--control-radius);
+  corner-shape: var(--corner);
+  background: var(--surface-sunken);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+.model-field__static svg { flex: none; }
+
+/* ───────────── Agent card · model, notes ───────────── */
+.agent-follow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--control-radius);
+  corner-shape: var(--corner);
+  background: var(--surface-sunken);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.agent-follow svg { flex: none; margin-top: 3px; color: var(--mint); }
+
+/* The agent's model is set but its way is not ready: say so, next to the way out. */
+.agent-warn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--tone-warning) 45%, transparent);
+  border-radius: var(--control-radius);
+  corner-shape: var(--corner);
+  background: var(--tone-warning-soft);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+.agent-warn > svg { flex: none; color: var(--tone-warning); }
+.agent-warn > span { flex: 1 1 14em; min-width: 0; }
+
+/* ───────────── Agent card · tool toggles ───────────── */
+.agent-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.agent-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px 0 7px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--chip-radius);
+  corner-shape: var(--corner);
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-xs);
+  line-height: 1;
+  white-space: nowrap;
+  transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+button.agent-tool { cursor: var(--cur-pointer); }
+button.agent-tool:hover { border-color: var(--line-strong); color: var(--text-2); }
+.agent-tool svg { flex: none; }
+.agent-tool__perm { color: var(--text-3); }
+.agent-tool.is-auto .agent-tool__perm { color: var(--firefly); }
+.agent-tool.is-confirm .agent-tool__perm { color: var(--gold); }
+/* Switched on: solid edge, a tint and a check — not colour alone. */
+.agent-tool.is-on { border-style: solid; border-color: var(--mint-line); background: var(--mint-soft); color: var(--text); }
+button.agent-tool.is-on:hover { border-color: var(--mint); color: var(--text); }
+.agent-tool__on { color: var(--mint); }
+/* Disabled by the 工具策略: struck through whatever the toggle says. */
+.agent-tool.is-off { text-decoration: line-through; text-decoration-thickness: 1px; }
+.agent-tool.is-static { cursor: var(--cur-default); }
+:root[data-mode="sam"] .agent-tool { font-family: var(--font-mono); letter-spacing: 0.02em; }
+:root[data-mode="sam"] .agent-tool.is-on { border-color: color-mix(in srgb, var(--firefly) 55%, transparent); background: var(--firefly-soft); }
+:root[data-mode="sam"] button.agent-tool.is-on:hover { border-color: var(--firefly); }
+:root[data-mode="sam"] .agent-tool__on, :root[data-mode="sam"] .agent-follow svg, :root[data-mode="sam"] .model-field__meta.is-known svg { color: var(--firefly); }
+
+@media (forced-colors: active) {
+  .agent-tool.is-on { border-color: Highlight; }
+  .agent-tool:not(.is-on) { border-style: dashed; }
+}

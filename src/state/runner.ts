@@ -1,5 +1,6 @@
-/* Drives the simulator: one tick every 200 ms while something is moving. Browsers throttle
-   background tabs, so each tick uses the real elapsed time (capped) rather than assuming 200 ms. */
+/* The run clock: one tick every 200 ms while a run is going, so run and step times count only the
+   time spent running. Browsers throttle background tabs, so each tick uses the real elapsed time
+   (capped) rather than assuming 200 ms. */
 import { needsTick, tick, TICK_MS } from './engine';
 import { store } from './store';
 

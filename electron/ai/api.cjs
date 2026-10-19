@@ -71,11 +71,12 @@ async function readSse(res, signal, onData) {
   if (idled && !signal.aborted) throw Object.assign(new Error(`超过 ${IDLE_MS / 60000} 分钟没有收到数据，连接已断开`), { code: 'EIDLE' });
 }
 
-/** Routes text inside <think>…</think> (MiniMax and some others put reasoning in the content) to thinking. */
+/** Routes text inside <think>…</think> (MiniMax and some others put reasoning in the content) to thinking.
+    Call `.end()` when the stream is over: a held-back possible tag start (a trailing 「<」) is real text. */
 function thinkSplitter(emit) {
   let inThink = false;
   let pending = '';
-  return (chunk) => {
+  const push = (chunk) => {
     pending += chunk;
     for (;;) {
       const tag = inThink ? '</think>' : '<think>';
@@ -97,7 +98,15 @@ function thinkSplitter(emit) {
       return;
     }
   };
+  push.end = () => {
+    if (pending) emit(inThink ? 'thinking' : 'text', pending);
+    pending = '';
+  };
+  return push;
 }
+
+/** The stream closed before the model said it was done: what arrived is only part of the reply. */
+const incomplete = () => Object.assign(new Error('连接提前结束，没有收到模型的结束信号，回复不完整。可以重新生成或重试这一步。'), { code: 'EINCOMPLETE' });
 
 function joinUrl(base, suffix) {
   return `${String(base).replace(/\/+$/, '')}${suffix}`;
@@ -172,7 +181,9 @@ async function streamOpenAI(spec, key, emit, signal) {
       });
     }
   });
+  split.end();
   if (signal.aborted) throw Object.assign(new Error('已停止'), { code: 'ABORTED' });
+  if (!finish) throw incomplete();
   return { text: full, stopReason: finish };
 }
 
@@ -198,6 +209,7 @@ async function streamAnthropic(spec, key, emit, signal) {
 
   let full = '';
   let stop = '';
+  let ended = false;
   let input = 0;
   let cached = 0;
   await readSse(res, signal, (j) => {
@@ -211,9 +223,10 @@ async function streamAnthropic(spec, key, emit, signal) {
     } else if (j.type === 'message_delta') {
       if (j.delta?.stop_reason) stop = j.delta.stop_reason;
       if (j.usage) emit({ type: 'usage', input, output: j.usage.output_tokens || 0, cached });
-    }
+    } else if (j.type === 'message_stop') ended = true;
   });
   if (signal.aborted) throw Object.assign(new Error('已停止'), { code: 'ABORTED' });
+  if (!ended && !stop) throw incomplete();
   return { text: full, stopReason: stop };
 }
 

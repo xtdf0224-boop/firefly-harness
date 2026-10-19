@@ -1,6 +1,6 @@
 /* Row model + selector for the run history table. One row per run, newest first. */
 import { isOpenRun } from '../../../lib/status';
-import type { AppState, DataSource, RunStatus } from '../../../lib/types';
+import type { AppState, RunStatus } from '../../../lib/types';
 import { stepProgress } from '../../../state/selectors';
 
 export interface HistoryRow {
@@ -18,7 +18,11 @@ export interface HistoryRow {
   inputTokens: number;
   outputTokens: number;
   artifacts: number;
-  source: DataSource;
+  /** The model the run used, e.g. 「Claude Sonnet 5.5 · Claude Code」. */
+  model: string;
+  /** Models of Agents that ran their steps on a model of their own, joined with 、 ('' = none). */
+  agentModels: string;
+  agentModelCount: number;
 }
 
 export function selectHistoryRows(s: AppState): HistoryRow[] {
@@ -27,6 +31,7 @@ export function selectHistoryRows(s: AppState): HistoryRow[] {
     const task = s.tasks[run.taskId];
     if (!task) continue;
     const { done, total } = stepProgress(run);
+    const own = [...new Set(Object.values(run.agentEngines ?? {}).map((e) => e?.label).filter((l): l is string => !!l))];
     rows.push({
       id: run.id,
       taskId: task.id,
@@ -41,7 +46,9 @@ export function selectHistoryRows(s: AppState): HistoryRow[] {
       inputTokens: run.usage.inputTokens,
       outputTokens: run.usage.outputTokens,
       artifacts: run.artifacts.length,
-      source: run.source,
+      model: run.engineLabel ?? task.engine?.label ?? '',
+      agentModels: own.join('、'),
+      agentModelCount: own.length,
     });
   }
   return rows.sort((a, b) => b.startedAt - a.startedAt || b.attempt - a.attempt);

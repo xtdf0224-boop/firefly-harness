@@ -1,6 +1,6 @@
-/* Shell region: left navigation, right status panel, approval card, connection banner, toasts and
-   dialog hosts. Everything reads tokens; 萨姆-only decoration hangs off :root[data-mode="sam"].
-   Class prefixes: .side-nav · .status-panel · .approval-card · .conn-banner · .toast · .shell-* */
+/* Shell region: left navigation, right status panel, approval card, toasts and dialog hosts.
+   Everything reads tokens; 萨姆-only decoration hangs off :root[data-mode="sam"].
+   Class prefixes: .side-nav · .status-panel · .approval-card · .toast · .shell-* */
 
 /* ───────────── shared ───────────── */
 
@@ -25,18 +25,6 @@
 .shell-link:hover { color: var(--mint-strong); text-decoration-color: currentColor; }
 
 .shell-dialog-subject { color: var(--text); font-weight: var(--fw-medium); overflow-wrap: anywhere; }
-.shell-dialog-list { display: grid; gap: 6px; margin-top: var(--sp-3); font-size: var(--fs-sm); }
-.shell-dialog-list li { position: relative; padding-left: 16px; }
-.shell-dialog-list li::before {
-  content: "";
-  position: absolute;
-  left: 3px;
-  top: 0.62em;
-  width: 5px;
-  height: 5px;
-  transform: rotate(45deg);
-  background: var(--gold);
-}
 
 /* ───────────── side nav ───────────── */
 
@@ -55,25 +43,28 @@
 .side-nav__name { font-size: var(--fs-lg); font-weight: var(--fw-semibold); letter-spacing: 0.06em; color: var(--text); }
 .side-nav__sub { white-space: nowrap; }
 
-/* 演示模式 marker: dashed gold, same family as SimTag. */
-.side-nav__demo {
+/* 模型接入 entry in the brand row: mint when something is connected, gold while nothing is. */
+.side-nav__models {
   position: relative;
   display: inline-flex;
   align-items: center;
   gap: 5px;
   height: 22px;
   padding: 0 8px;
-  border-radius: 4px;
-  border: 1px dashed rgb(242 200 121 / 0.5);
-  background: rgb(242 200 121 / 0.07);
-  color: var(--gold);
+  border-radius: var(--control-radius);
+  corner-shape: var(--corner);
+  border: 1px solid var(--mint-line);
+  background: var(--mint-soft);
+  color: var(--mint);
   font-size: var(--fs-2xs);
   font-weight: var(--fw-medium);
   line-height: 1;
   white-space: nowrap;
   transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
 }
-.side-nav__demo:hover { background: rgb(242 200 121 / 0.14); border-color: rgb(242 200 121 / 0.75); }
+.side-nav__models:hover { border-color: var(--mint); background: color-mix(in srgb, var(--mint) 20%, transparent); }
+.side-nav__models.is-empty { border-color: color-mix(in srgb, var(--tone-warning) 55%, transparent); background: var(--tone-warning-soft); color: var(--tone-warning); }
+.side-nav__models.is-empty:hover { border-color: var(--tone-warning); background: color-mix(in srgb, var(--tone-warning) 20%, transparent); }
 
 .side-nav__cta { position: relative; width: 100%; }
 .side-nav__cta[aria-current="page"] {
@@ -223,9 +214,9 @@
   white-space: nowrap;
   border: 0;
 }
-/* The 演示模式 marker is the global honesty marker, so it keeps a word in the rail: icon over 「演示」. */
+/* In the rail the model entry keeps its short text under the icon: a count, or 「未接入」. */
 @media (min-width: 640px) {
-  .side-nav[data-compact="true"] .side-nav__demo {
+  .side-nav[data-compact="true"] .side-nav__models {
     width: 40px;
     height: auto;
     min-height: 34px;
@@ -234,7 +225,7 @@
     justify-content: center;
     gap: 3px;
   }
-  .side-nav[data-compact="true"] .side-nav__demo-more {
+  .side-nav[data-compact="true"] .side-nav__models-more {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -272,7 +263,7 @@
 .side-nav[data-compact="true"] .side-nav__footer { grid-template-columns: 1fr; gap: var(--sp-2); }
 
 /* ── < 640px: top bar in two rows (nothing scrolls sideways, so the mode switch and 设置 are always reachable):
-      brand + 演示模式 ........ 状态 · 视觉模式
+      brand + 模型接入 ........ 状态 · 视觉模式
       新建任务 · 5 个导航图标 ── */
 @media (max-width: 639px) {
   .side-nav {
@@ -293,7 +284,7 @@
   .side-nav[data-compact="true"] .side-nav__top { flex-direction: row; }
   .side-nav[data-compact="true"] .side-nav__brandrow { flex-direction: row; flex-wrap: nowrap; justify-content: flex-start; gap: var(--sp-3); }
   .side-nav__list { flex-direction: row; justify-content: space-between; gap: var(--sp-1); }
-  .side-nav__cta, .side-nav__item, .side-nav__demo, .side-nav__mode-btn { flex: none; }
+  .side-nav__cta, .side-nav__item, .side-nav__models, .side-nav__mode-btn { flex: none; }
   .side-nav[data-compact="true"] .side-nav__footer {
     display: flex;
     flex-direction: row;
@@ -357,6 +348,9 @@
 }
 
 .status-panel__muted { font-size: var(--fs-xs); color: var(--text-3); }
+/* A model that cannot be used right now: said once, in the warning tone, above the facts. */
+.status-panel__alert { display: flex; align-items: flex-start; gap: 6px; font-size: var(--fs-sm); color: var(--tone-warning); overflow-wrap: anywhere; }
+.status-panel__alert svg { flex: none; margin-top: 3px; }
 .status-panel__skipped { margin-left: 4px; font-size: var(--fs-xs); color: var(--text-3); }
 /* base.css resets margins on p/ul/figure but not dl, so the UA's 1em block margin would leak in. */
 .status-panel .kv { margin: 0; }
@@ -442,7 +436,7 @@
 .status-panel__agent-model { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-3); overflow-wrap: anywhere; }
 
 /* 模型 / 上下文 / Token */
-.status-panel__model { overflow-wrap: anywhere; font-size: var(--fs-xs); }
+.status-panel__model { overflow-wrap: anywhere; }
 .status-panel__figure { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; font-size: var(--fs-sm); color: var(--text); }
 .status-panel__warn { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font-size: var(--fs-xs); font-weight: var(--fw-medium); color: var(--tone-warning); }
 .status-panel__warn.is-danger { color: var(--tone-danger); }
@@ -514,7 +508,6 @@
 .approval-card:focus { outline: none; }
 .approval-card:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
 .approval-card__title { flex: 1; min-width: 0; font-size: var(--fs-md); font-weight: var(--fw-semibold); line-height: var(--lh-tight); color: var(--text); overflow-wrap: anywhere; }
-.approval-card__head .sim-tag { margin-top: 1px; }
 .approval-card__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; font-size: var(--fs-xs); color: var(--text-2); }
 .approval-card__who { flex: 0 1 auto; min-width: 0; }
 .approval-card__time { margin-left: auto; font-size: var(--fs-xs); color: var(--text-3); white-space: nowrap; }
@@ -537,37 +530,9 @@
 .approval-card__toggle:hover { color: var(--text); background: var(--surface-hover); }
 .approval-card__preview[hidden] { display: none; }
 
-/* Says out loud that approving only moves the simulator along — nothing is written or executed. */
-.approval-card__sim {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 6px 8px;
-  border: 1px dashed rgb(242 200 121 / 0.45);
-  border-radius: var(--control-radius);
-  corner-shape: var(--corner);
-  background: rgb(242 200 121 / 0.06);
-  font-size: var(--fs-xs);
-  line-height: 1.5;
-  color: var(--text-2);
-}
-.approval-card__sim svg { flex: none; margin-top: 3px; color: var(--gold); }
 .approval-card__actions { display: flex; gap: var(--sp-2); margin-top: 2px; }
 .approval-card--compact .approval-card__actions .btn { flex: 1; }
 .approval-card__decided { display: flex; align-items: center; gap: var(--sp-2); }
-
-/* ───────────── connection banner ───────────── */
-
-/* Container so the shared .callout can stack its buttons under the text when the main area is narrow. */
-.conn-banner { flex: none; container-type: inline-size; animation: ff-fade-up var(--dur-3) var(--ease) both; }
-.conn-banner .callout__text { font-variant-numeric: tabular-nums; }
-/* 萨姆: faint diagonal hazard stripes behind the disconnected state. */
-:root[data-mode="sam"] .conn-banner .callout--danger {
-  background:
-    repeating-linear-gradient(135deg, rgb(255 139 123 / 0.07) 0 8px, transparent 8px 16px),
-    linear-gradient(90deg, var(--c-soft), transparent 75%),
-    var(--surface-strong);
-}
 
 /* ───────────── toasts ───────────── */
 /* Position comes from two variables so the breakpoint rules below can never lose a specificity fight with the

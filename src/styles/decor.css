@@ -286,7 +286,7 @@
   overflow: hidden;
   background: #000;
   color: var(--text);
-  cursor: pointer;
+  cursor: var(--cur-pointer);
   user-select: none;
 }
 .boot.is-enter { opacity: 0; transition: opacity 650ms var(--ease) 250ms; pointer-events: none; }

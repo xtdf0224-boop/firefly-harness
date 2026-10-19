@@ -1,7 +1,7 @@
 /* 最近任务 on the welcome page: up to four compact cards, newest activity first. */
 import { ArrowRight } from 'lucide-react';
 import { useMemo } from 'react';
-import { StatusChip, SimTag, Button, EngineTag } from '../../ui';
+import { Badge, Button, EngineTag, StatusChip } from '../../ui';
 import { useNow } from '../../../lib/hooks';
 import { relative } from '../../../lib/format';
 import { actions } from '../../../state/actions';
@@ -28,7 +28,7 @@ export function RecentTasks() {
             <button type="button" className="new-task-recent__card" onClick={() => actions.openTask(t.id)}>
               <span className="new-task-recent__top">
                 <StatusChip meta={metaOf(t.status, t.kind)} size="sm" />
-                {t.engine && t.source === 'live' ? <EngineTag label={t.engine} compact /> : <SimTag source={t.source} />}
+                {t.engine ? <EngineTag label={t.engine} compact /> : <Badge tone="warning">未选模型</Badge>}
               </span>
               <span className="new-task-recent__name">{t.title}</span>
               <span className="new-task-recent__time">更新于 {relative(t.updatedAt, now)}</span>

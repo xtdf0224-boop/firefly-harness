@@ -1,4 +1,4 @@
-/* 萤火浏览器 on 工具与连接: the window agents drive when a work task has 浏览器 on. Open it to log in
+/* 萤火浏览器 on 工具与技能: the window agents drive when a work task has 浏览器 on. Open it to log in
    to sites first; clear its data to log out of everything. */
 import { Eraser, Globe, MousePointerClick, ShieldOff } from 'lucide-react';
 import { desktop } from '../../../lib/desktop';
@@ -15,12 +15,14 @@ export function BrowserPanel() {
       </p>
       <ul className="browser-panel__points">
         <li><MousePointerClick size={14} aria-hidden />「浏览网页」（读取当前页面、滚动、截图）默认自动执行，「操作网页」（打开网址、点击、输入）默认先征求确认——在下方「工具」里可以改。Codex 不能逐项确认，会直接执行。</li>
-        <li><Globe size={14} aria-hidden />需要登录的网站，先在萤火浏览器里自己登录；它的 Cookie 和登录状态只属于这个窗口。Agent 不会替你输入密码或付款，页面快照也不会带出密码框和验证码的内容。</li>
+        <li><Globe size={14} aria-hidden />萤火浏览器有自己的地址栏，可以直接输入网址或搜索，先登录需要的网站。它的 Cookie 和登录状态只属于这个窗口；Agent 不会替你输入密码或付款，页面快照也不会带出密码框和验证码的内容。</li>
         <li><ShieldOff size={14} aria-hidden />萤火浏览器不会打开本机或内网地址（localhost、127.0.0.1、192.168.x.x 等），网页里的请求和跳转也一样。</li>
       </ul>
       {desktopOk ? (
         <div className="skills-panel__actions">
-          <Button size="sm" variant="secondary" icon={Globe} onClick={() => void desktop?.browser?.open()}>打开萤火浏览器</Button>
+          <Button size="sm" variant="secondary" icon={Globe} onClick={async () => {
+            if ((await desktop?.browser?.open()) === false) actions.toast({ tone: 'warning', title: '没能打开萤火浏览器', body: '窗口没有打开，稍后再试一次。' });
+          }}>打开萤火浏览器</Button>
           <Button size="sm" variant="ghost" icon={Eraser} onClick={async () => {
             if (!window.confirm('清除萤火浏览器的全部 Cookie、登录状态和缓存？')) return;
             await desktop?.browser?.clear();

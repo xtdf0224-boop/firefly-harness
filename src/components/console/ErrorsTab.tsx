@@ -1,24 +1,24 @@
 /* 错误 tab: every error of the run, newest first. */
-import { CheckCircle2, ChevronRight, Flag, RotateCcw, Wrench, XOctagon } from 'lucide-react';
+import { CheckCircle2, ChevronRight, Flag, RotateCcw, SkipForward, Wrench, XOctagon } from 'lucide-react';
 import { useId, useMemo, useState } from 'react';
 import { timeOfDay } from '../../lib/format';
 import type { StatusMeta } from '../../lib/status';
-import type { DataSource, PlanStep, RunErrorRecord } from '../../lib/types';
+import type { PlanStep, RunErrorRecord } from '../../lib/types';
 import { actions } from '../../state/actions';
 import { useApp } from '../../state/store';
-import { Badge, Button, CodeBlock, EmptyState, SimTag, StatusChip, cx } from '../ui';
+import { Badge, Button, CodeBlock, EmptyState, StatusChip, cx } from '../ui';
 
 const EMPTY_ERRORS: RunErrorRecord[] = [];
 const EMPTY_PLAN: PlanStep[] = [];
 
 const FATAL: StatusMeta = { label: '导致运行失败', tone: 'danger', icon: Flag };
-const RECOVERED: StatusMeta = { label: '已自动恢复', tone: 'success', icon: RotateCcw };
+/** A failed call that did not stop the run: the agent carried on (or tried something else). */
+const CONTINUED: StatusMeta = { label: '运行继续', tone: 'warning', icon: SkipForward };
 
 export function ErrorsTab({ runId }: { runId?: string }) {
   const errors = useApp((s) => (runId ? s.runs[runId]?.errors : undefined)) ?? EMPTY_ERRORS;
   const plan = useApp((s) => (runId ? s.runs[runId]?.plan : undefined)) ?? EMPTY_PLAN;
   const runStatus = useApp((s) => (runId ? s.runs[runId]?.status : undefined));
-  const source = useApp((s): DataSource => (runId ? s.runs[runId]?.source : undefined) ?? 'simulated');
   // Retry only belongs on the task's newest run, as in the workspace: retrying an older failed run
   // while a newer one exists would branch a spurious extra run from it.
   const isLatest = useApp((s) => {
@@ -37,11 +37,10 @@ export function ErrorsTab({ runId }: { runId?: string }) {
     <>
       {runId && (
         <div className="console__toolbar">
-          <SimTag source={source} />
           <span className="console__note">
             {errors.length === 0
               ? '没有错误'
-              : `共 ${errors.length} 个错误：${fatalCount} 个导致运行失败，${errors.length - fatalCount} 个已自动恢复`}
+              : `共 ${errors.length} 个错误：${fatalCount} 个导致运行失败，${errors.length - fatalCount} 个没有中断运行`}
           </span>
         </div>
       )}
@@ -74,12 +73,12 @@ function ErrorCard({ err, step, retryable, historic, runId, defaultOpen }: {
   const [open, setOpen] = useState(defaultOpen);
   const detailId = useId();
   return (
-    <article className={cx('err-card', err.fatal ? 'err-card--fatal' : 'err-card--recovered')}>
+    <article className={cx('err-card', err.fatal ? 'err-card--fatal' : 'err-card--continued')}>
       <header className="err-card__head">
         <XOctagon className="err-card__icon" size={16} aria-hidden />
         <h3 className="err-card__title">{err.title}</h3>
         <Badge tone="danger" className="err-card__code">{err.code}</Badge>
-        <StatusChip meta={err.fatal ? FATAL : RECOVERED} size="sm" glow={false} />
+        <StatusChip meta={err.fatal ? FATAL : CONTINUED} size="sm" glow={false} />
         <span className="err-card__meta">
           <time dateTime={new Date(err.at).toISOString()}>{timeOfDay(err.at)}</time>
           {step && <span className="err-card__step"> · {step}</span>}

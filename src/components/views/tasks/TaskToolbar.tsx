@@ -4,6 +4,7 @@ import { useId } from 'react';
 import { RUN_STATUS } from '../../../lib/status';
 import type { TaskStatus } from '../../../state/selectors';
 import { cx } from '../../ui';
+import { MenuSelect } from '../../ui/MenuSelect';
 import { DRAFT_META } from './taskInfo';
 
 export type StatusFilter = 'all' | 'active' | 'awaiting' | 'completed' | 'failed' | 'cancelled' | 'draft';
@@ -55,10 +56,8 @@ export function TaskToolbar({ query, onQuery, status, onStatus, counts, sort, on
           />
         </div>
         <div className="task-list-sort">
-          <label className="task-list-sort__label" htmlFor={`${uid}-s`}>排序</label>
-          <select id={`${uid}-s`} className="select" value={sort} onChange={(e) => onSort(e.target.value as SortKey)}>
-            {SORTS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-          </select>
+          <span className="task-list-sort__label" aria-hidden>排序</span>
+          <MenuSelect<SortKey> variant="field" label="排序" value={sort} onChange={onSort} options={SORTS.map((o) => ({ value: o.id, label: o.label }))} />
         </div>
         <p className="task-list-toolbar__count" role="status">
           {shown === total ? `共 ${total} 个任务` : `显示 ${shown} / ${total} 个任务`}

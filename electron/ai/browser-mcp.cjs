@@ -38,7 +38,7 @@ async function call(name, args) {
 async function handle(msg) {
   const { id, method, params } = msg;
   if (method === 'initialize') {
-    send({ id, result: { protocolVersion: (params && params.protocolVersion) || '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'firefly-browser', version: '0.2.0' },
+    send({ id, result: { protocolVersion: (params && params.protocolVersion) || '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'firefly-browser', version: '2.0.0' },
       instructions: 'Tools to drive the 萤火浏览器 window. Typical loop: browser_navigate → read the snapshot → browser_click / browser_type by ref → read the new snapshot. Refs change when the page changes.' } });
     return;
   }

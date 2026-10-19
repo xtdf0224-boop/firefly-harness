@@ -13,13 +13,14 @@ import { isOpenRun, TOOL_STATUS } from '../../lib/status';
 import type { Agent, AppState, Message, ToolCall } from '../../lib/types';
 import { actions } from '../../state/actions';
 import { regenerate, stopReply } from '../../state/live';
-import { engineChoices, engineFromChoice, type EngineChoice } from '../../state/models';
+import { engineFromChoice } from '../../state/models';
 import { shallow, useApp } from '../../state/store';
-import { AgentAvatar, Button, EngineTag, SimTag, cx } from '../ui';
+import { AgentAvatar, Button, EngineTag, cx } from '../ui';
 import { Markdown } from './Markdown';
 import { ModelChips, type ModelPick } from './ModelChips';
+import { ModelNotice } from './ModelNotice';
 import { PromptBox } from './PromptBox';
-import { useFocusRequest } from './shared';
+import { useFocusRequest, useTaskEngine } from './shared';
 
 const NO_MESSAGES: Message[] = [];
 const NO_RUNS: string[] = [];
@@ -195,7 +196,6 @@ export function Conversation({ taskId, runId, latestId, active, chat }: Conversa
 const MessageItem = memo(function MessageItem({ message: m, agent: base, flat, last, taskId }: { message: Message; agent?: Agent; flat: boolean; last: boolean; taskId: string }) {
   // The voice that spoke keeps its name, even after switching modes or turning the persona off.
   const agent = base && m.persona ? { ...base, name: PERSONA[m.persona].name, glyph: PERSONA[m.persona].glyph } : base;
-  const runSource = useApp((s) => (m.runId ? s.runs[m.runId]?.source : undefined));
   const time = <time className="ws-msg__time" dateTime={new Date(m.at).toISOString()}>{timeOfDay(m.at)}</time>;
 
   if (m.role === 'system') return <p className="ws-msg ws-msg--system">{m.text}{time}</p>;
@@ -220,7 +220,6 @@ const MessageItem = memo(function MessageItem({ message: m, agent: base, flat, l
         <header className="ws-msg__head">
           <span className="ws-msg__name">{name}</span>
           {kind && KindIcon && <span className={`ws-kind ws-kind--${kind.tone}`}><KindIcon size={11} aria-hidden />{kind.label}</span>}
-          {m.simulated && <SimTag source={runSource ?? 'simulated'} compact />}
           {time}
         </header>
         {m.thinking && <Thinking text={m.thinking} live={!!m.streaming && !m.text} voice={m.persona} />}
@@ -228,12 +227,15 @@ const MessageItem = memo(function MessageItem({ message: m, agent: base, flat, l
           <div className="ws-msg__bubble ws-msg__bubble--typing" aria-label={`${name}正在输入`}>
             <span className="ws-typing__dots" aria-hidden><i /><i /><i /></span>
           </div>
-        ) : waiting ? null : m.live ? (
+        ) : waiting ? null : (
           <div className={cx('ws-msg__bubble ws-msg__bubble--md', m.streaming && 'is-streaming')} aria-busy={m.streaming || undefined}>
             <Markdown source={m.text} headingLevel={4} className="ws-msg__md" />
           </div>
-        ) : (
-          <div className={cx('ws-msg__bubble', m.streaming && 'is-streaming')} aria-busy={m.streaming || undefined}>{m.text}</div>
+        )}
+        {m.streaming && m.activity && (
+          <p className="ws-msg__activity" role="status">
+            <span className="ws-typing__dots" aria-hidden><i /><i /><i /></span>{m.activity}
+          </p>
         )}
         {flat && !m.streaming && m.text && <MessageActions text={m.text} canRetry={last} taskId={taskId} />}
       </div>
@@ -297,14 +299,10 @@ const InlineTool = memo(function InlineTool({ call }: { call: ToolCall }) {
 
 /* ───────────── composer ───────────── */
 
-const selectChoices = (s: AppState) => engineChoices(s.models);
-const sameChoices = (a: EngineChoice[], b: EngineChoice[]) => a.length === b.length && a.every((c, i) => c.key === b[i].key && c.label === b[i].label);
-
 function Composer({ taskId, onSent, chat }: { taskId: string; onSent: () => void; chat: boolean }) {
   const [text, setText] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const engine = useApp((s) => s.tasks[taskId]?.engine);
-  const choices = useApp(selectChoices, sameChoices);
+  const { engine, choices, state } = useTaskEngine(taskId);
   const runOpen = useApp((s) => {
     const t = s.tasks[taskId];
     const r = t?.runIds.length ? s.runs[t.runIds[t.runIds.length - 1]] : undefined;
@@ -325,27 +323,28 @@ function Composer({ taskId, onSent, chat }: { taskId: string; onSent: () => void
   };
 
   // 闲聊 can switch model and effort mid-conversation; the next reply uses them.
-  const currentKey = engine ? (choices.find((c) => c.provider === engine.provider && c.auth === engine.auth)?.key ?? `${engine.provider}:${engine.auth}`) : 'demo';
+  const currentKey = engine ? `${engine.provider}:${engine.auth}` : '';
   const switchTo = async (p: ModelPick) => {
-    if (p.key === currentKey && engine && p.model === engine.model && p.effort === engine.effort) return;
     const c = choices.find((x) => x.key === p.key);
-    if (!c) { actions.setTaskEngine(taskId, undefined); return; }
+    if (!c) return;
+    if (engine && p.key === currentKey && c.driver === engine.driver && p.model === engine.model && p.effort === engine.effort) return;
     const cwd = c.auth === 'cli' ? (engine?.cwd ?? await desktop?.workspaceFolder(`chat-${Date.now().toString(36)}`)) : undefined;
     actions.setTaskEngine(taskId, engineFromChoice(c, { cwd, model: p.model, effort: p.effort }));
   };
 
   const chips = chat
-    ? <ModelChips pick={{ key: currentKey, model: engine?.model ?? '', effort: engine?.effort }} onPick={(p) => void switchTo(p)} />
-    : engine ? <EngineTag label={engine.label} /> : <SimTag />;
+    ? <ModelChips pick={{ key: currentKey, model: engine?.model ?? '', effort: engine?.effort, driver: engine?.driver }} onPick={(p) => void switchTo(p)} />
+    : engine && <EngineTag label={engine.label} />;
 
+  // A reply needs a model; supplements to a work task are only stored until it runs, so they never wait for one.
+  const blocked = chat && state !== 'ready' ? (choices.length ? '先选一个能用的模型' : '先到「模型接入」接入一个模型') : undefined;
   const hint = chat
-    ? (engine ? 'Enter 发送，Shift + Enter 换行' : '演示模式：她只会说几句预设的话。Enter 发送，Shift + Enter 换行')
-    : engine
-      ? (runOpen ? '补充说明会交给正在执行的 Agent' : hasRun ? `可以追问结果（${persona}会回答，但不会再动文件）` : '开始运行时，这些补充会一起交给 Agent')
-      : '演示模式：会收到模拟回复';
+    ? 'Enter 发送，Shift + Enter 换行'
+    : runOpen ? '补充说明会交给正在执行的 Agent' : hasRun ? `可以追问结果（${persona}会回答，但不会再动文件）` : '开始运行时，这些补充会一起交给 Agent';
 
   return (
     <div className={cx('ws-composer-wrap', chat && 'ws-composer-wrap--chat')}>
+      {chat && <ModelNotice taskId={taskId} chat />}
       <PromptBox
         variant="docked"
         id={`ws-composer-${taskId}`}
@@ -357,6 +356,7 @@ function Composer({ taskId, onSent, chat }: { taskId: string; onSent: () => void
         placeholder={chat ? `和${persona}说点什么…` : '补充说明或调整要求…'}
         chips={chips}
         hint={hint}
+        blocked={blocked}
         busy={chat && replying}
         onStop={() => stopReply(taskId)}
       />

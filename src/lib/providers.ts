@@ -3,8 +3,8 @@
    suggestions — any model id the vendor accepts can be typed in. */
 import type { DriverId, ProviderConfig, ProviderId } from './types';
 
-/** `ctx`: context window in tokens, when the vendor documents it. */
-export interface ModelOption { id: string; note?: string; ctx?: number }
+/** `label`: the product name with its version (Claude Sonnet 5.5); `ctx`: context window in tokens, when documented. */
+export interface ModelOption { id: string; label?: string; note?: string; ctx?: number }
 export interface RegionOption {
   id: string;
   label: string;
@@ -84,24 +84,50 @@ export const PROVIDERS: ProviderInfo[] = [
   {
     id: 'claude', name: 'Claude', vendor: 'Anthropic', glyph: 'C', protocol: 'anthropic',
     regions: [{ id: 'global', label: '官方', baseUrl: 'https://api.anthropic.com' }],
-    models: [{ id: 'claude-sonnet-5-5', note: '均衡', ctx: 1_000_000 }, { id: 'claude-opus-5-5', note: '更强', ctx: 1_000_000 }, { id: 'claude-fable-5-1', note: '旗舰', ctx: 1_000_000 }, { id: 'claude-haiku-5-5', note: '快速', ctx: 1_000_000 }],
-    cliModels: { 'claude-code': [{ id: '', note: 'Claude Code 默认' }, { id: 'sonnet[1m]', note: '1M 上下文' }, { id: 'opus[1m]', note: '1M 上下文' }, { id: 'claude-fable-5-1[1m]', note: '1M 上下文' }, { id: 'haiku' }] },
+    models: [
+      { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', note: '均衡', ctx: 1_000_000 },
+      { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', note: '更强', ctx: 1_000_000 },
+      { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', note: '旗舰', ctx: 1_000_000 },
+      { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', note: '快速', ctx: 1_000_000 },
+    ],
+    cliModels: { 'claude-code': [
+      { id: '', note: 'Claude Code 默认' },
+      { id: 'sonnet[1m]', label: 'Claude Sonnet 5.5', note: '均衡', ctx: 1_000_000 },
+      { id: 'opus[1m]', label: 'Claude Opus 5.5', note: '更强', ctx: 1_000_000 },
+      { id: 'claude-fable-5-1[1m]', label: 'Claude Fable 5.1', note: '旗舰', ctx: 1_000_000 },
+      { id: 'haiku', label: 'Claude Haiku 5.5', note: '快速', ctx: 1_000_000 },
+    ] },
     keyUrl: 'https://platform.claude.com/settings/keys', keyHelp: '在 Claude 开发者平台的 API Keys 页面创建，以 sk-ant- 开头。',
     drivers: ['claude-code'],
   },
   {
     id: 'gpt', name: 'GPT', vendor: 'OpenAI', glyph: 'G', protocol: 'openai',
     regions: [{ id: 'global', label: '官方', baseUrl: 'https://api.openai.com/v1' }],
-    models: [{ id: 'gpt-6.1-sol', note: '均衡', ctx: 1_050_000 }, { id: 'gpt-6-astra', note: '旗舰', ctx: 1_050_000 }, { id: 'gpt-6-luna', note: '快速', ctx: 1_050_000 }],
-    cliModels: { codex: [{ id: '', note: 'Codex 默认' }, { id: 'gpt-6.1-sol' }, { id: 'gpt-6-astra' }, { id: 'gpt-6-luna' }] },
+    models: [
+      { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', note: '均衡', ctx: 1_050_000 },
+      { id: 'gpt-6-astra', label: 'GPT-6 Astra', note: '旗舰', ctx: 1_050_000 },
+      { id: 'gpt-6-luna', label: 'GPT-6 Luna', note: '快速', ctx: 1_050_000 },
+    ],
+    cliModels: { codex: [
+      { id: '', note: 'Codex 默认' },
+      { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', note: '均衡', ctx: 1_050_000 },
+      { id: 'gpt-6-astra', label: 'GPT-6 Astra', note: '旗舰', ctx: 1_050_000 },
+      { id: 'gpt-6-luna', label: 'GPT-6 Luna', note: '快速', ctx: 1_050_000 },
+    ] },
     keyUrl: 'https://platform.openai.com/api-keys', keyHelp: '在 OpenAI Platform 的 API keys 页面创建，以 sk- 开头。',
     drivers: ['codex'],
   },
   {
     id: 'deepseek', name: 'DeepSeek', vendor: '深度求索', glyph: 'D', protocol: 'openai',
     regions: [{ id: 'cn', label: '官方', baseUrl: 'https://api.deepseek.com', compatUrl: 'https://api.deepseek.com/anthropic' }],
-    models: [{ id: 'deepseek-flash', note: 'V4.1 Flash', ctx: 1_000_000 }, { id: 'deepseek-v4-pro', note: 'V4 Pro' }],
-    cliModels: { dsh: [{ id: 'deepseek-flash', note: 'DSH 默认' }, { id: 'deepseek-v4-pro' }], 'claude-compat': [{ id: 'deepseek-flash', ctx: 1_000_000 }, { id: 'deepseek-v4-pro' }] },
+    models: [
+      { id: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', note: '快速', ctx: 1_000_000 },
+      { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', note: '旗舰' },
+    ],
+    cliModels: {
+      dsh: [{ id: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', note: 'DSH 默认', ctx: 1_000_000 }, { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', note: '旗舰' }],
+      'claude-compat': [{ id: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', note: '快速', ctx: 1_000_000 }, { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', note: '旗舰' }],
+    },
     keyUrl: 'https://platform.deepseek.com/api_keys', keyHelp: '在 DeepSeek 开放平台的 API keys 页面创建。',
     drivers: ['dsh', 'claude-compat'],
   },
@@ -111,8 +137,20 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: 'cn', label: '国内', baseUrl: 'https://api.moonshot.cn/v1', compatUrl: 'https://api.moonshot.cn/anthropic' },
       { id: 'global', label: '国际', baseUrl: 'https://api.moonshot.ai/v1', compatUrl: 'https://api.moonshot.ai/anthropic' },
     ],
-    models: [{ id: 'kimi-k3', note: '旗舰', ctx: 1_000_000 }, { id: 'kimi-k2.7-code', note: '编程', ctx: 256_000 }, { id: 'kimi-k2.7-code-highspeed', note: '快速编程', ctx: 256_000 }, { id: 'kimi-k2.6', ctx: 256_000 }],
-    cliModels: { kimi: [{ id: '', note: 'Kimi Code 默认' }], 'claude-compat': [{ id: 'kimi-k3', ctx: 1_000_000 }, { id: 'kimi-k2.7-code', ctx: 256_000 }, { id: 'kimi-k2.7-code-highspeed', ctx: 256_000 }] },
+    models: [
+      { id: 'kimi-k3', label: 'Kimi K3', note: '旗舰', ctx: 1_000_000 },
+      { id: 'kimi-k2.7-code', label: 'Kimi K2.7 Code', note: '编程', ctx: 256_000 },
+      { id: 'kimi-k2.7-code-highspeed', label: 'Kimi K2.7 Code 高速版', note: '快速编程', ctx: 256_000 },
+      { id: 'kimi-k2.6', label: 'Kimi K2.6', note: '上一代', ctx: 256_000 },
+    ],
+    cliModels: {
+      kimi: [{ id: '', note: 'Kimi Code 默认' }],
+      'claude-compat': [
+        { id: 'kimi-k3', label: 'Kimi K3', note: '旗舰', ctx: 1_000_000 },
+        { id: 'kimi-k2.7-code', label: 'Kimi K2.7 Code', note: '编程', ctx: 256_000 },
+        { id: 'kimi-k2.7-code-highspeed', label: 'Kimi K2.7 Code 高速版', note: '快速编程', ctx: 256_000 },
+      ],
+    },
     keyUrl: 'https://platform.kimi.com/console/api-keys', keyHelp: '在 Kimi 开放平台的 API Keys 页面创建；国内、国际站的密钥不通用。',
     drivers: ['kimi', 'claude-compat'],
   },
@@ -123,8 +161,15 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: 'global', label: '国际（按量）', baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1' },
       { id: 'coding', label: 'Coding Plan', baseUrl: 'https://coding.dashscope.aliyuncs.com/v1', compatUrl: 'https://coding.dashscope.aliyuncs.com/apps/anthropic' },
     ],
-    models: [{ id: 'qwen3.7-plus', note: '均衡 · Coding Plan 可用' }, { id: 'qwen3.8-max', note: '旗舰' }, { id: 'qwen3.8-flash', note: '快速' }],
-    cliModels: { qwen: [{ id: 'qwen3.7-plus' }, { id: 'qwen3.8-max' }], 'claude-compat': [{ id: 'qwen3.7-plus' }, { id: 'qwen3.8-max' }] },
+    models: [
+      { id: 'qwen3.7-plus', label: 'Qwen3.7 Plus', note: '均衡 · Coding Plan 可用' },
+      { id: 'qwen3.8-max', label: 'Qwen3.8 Max', note: '旗舰' },
+      { id: 'qwen3.8-flash', label: 'Qwen3.8 Flash', note: '快速' },
+    ],
+    cliModels: {
+      qwen: [{ id: 'qwen3.7-plus', label: 'Qwen3.7 Plus', note: '均衡' }, { id: 'qwen3.8-max', label: 'Qwen3.8 Max', note: '旗舰' }],
+      'claude-compat': [{ id: 'qwen3.7-plus', label: 'Qwen3.7 Plus', note: '均衡' }, { id: 'qwen3.8-max', label: 'Qwen3.8 Max', note: '旗舰' }],
+    },
     keyUrl: 'https://bailian.console.aliyun.com/cn-beijing/model/settings/api-key', keyHelp: '在阿里云百炼的 API Key 页面创建，以 sk- 开头；密钥按地域独立，Coding Plan 有自己的密钥。',
     drivers: ['qwen', 'claude-compat'],
   },
@@ -135,8 +180,14 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: 'global', label: '国际（Z.ai）', baseUrl: 'https://api.z.ai/api/paas/v4', compatUrl: 'https://api.z.ai/api/anthropic' },
       { id: 'coding', label: 'Coding Plan', baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4', compatUrl: 'https://open.bigmodel.cn/api/anthropic' },
     ],
-    models: [{ id: 'glm-5.3', note: '旗舰', ctx: 1_000_000 }, { id: 'glm-5.3-flash', note: '快速', ctx: 1_000_000 }],
-    cliModels: { 'claude-compat': [{ id: 'glm-5.3', ctx: 1_000_000 }, { id: 'glm-5.3-flash', ctx: 1_000_000 }] },
+    models: [
+      { id: 'glm-5.3', label: 'GLM-5.3', note: '旗舰', ctx: 1_000_000 },
+      { id: 'glm-5.3-flash', label: 'GLM-5.3 Flash', note: '快速', ctx: 1_000_000 },
+    ],
+    cliModels: { 'claude-compat': [
+      { id: 'glm-5.3', label: 'GLM-5.3', note: '旗舰', ctx: 1_000_000 },
+      { id: 'glm-5.3-flash', label: 'GLM-5.3 Flash', note: '快速', ctx: 1_000_000 },
+    ] },
     keyUrl: 'https://bigmodel.cn/usercenter/proj-mgmt/apikeys', keyHelp: '在智谱开放平台的 API Keys 页面创建；GLM Coding Plan、标准 API 的密钥互不通用，国际站在 z.ai 创建。',
     drivers: ['claude-compat'],
   },
@@ -146,8 +197,16 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: 'cn', label: '国内', baseUrl: 'https://api.minimax.cn/v1', compatUrl: 'https://api.minimax.cn/anthropic' },
       { id: 'global', label: '国际', baseUrl: 'https://api.minimax.io/v1', compatUrl: 'https://api.minimax.io/anthropic' },
     ],
-    models: [{ id: 'MiniMax-M3', note: '旗舰', ctx: 1_000_000 }, { id: 'MiniMax-M2.7', note: '均衡' }, { id: 'MiniMax-M2.7-highspeed', note: '快速' }, { id: 'MiniMax-M2.5', note: '编程' }],
-    cliModels: { mcode: [{ id: '', note: 'MiniMax Code 默认' }], 'claude-compat': [{ id: 'MiniMax-M3', ctx: 1_000_000 }, { id: 'MiniMax-M2.5' }] },
+    models: [
+      { id: 'MiniMax-M3', label: 'MiniMax M3', note: '旗舰', ctx: 1_000_000 },
+      { id: 'MiniMax-M2.7', label: 'MiniMax M2.7', note: '均衡' },
+      { id: 'MiniMax-M2.7-highspeed', label: 'MiniMax M2.7 高速版', note: '快速' },
+      { id: 'MiniMax-M2.5', label: 'MiniMax M2.5', note: '编程' },
+    ],
+    cliModels: {
+      mcode: [{ id: '', note: 'MiniMax Code 默认' }],
+      'claude-compat': [{ id: 'MiniMax-M3', label: 'MiniMax M3', note: '旗舰', ctx: 1_000_000 }, { id: 'MiniMax-M2.5', label: 'MiniMax M2.5', note: '编程' }],
+    },
     keyUrl: 'https://platform.minimax.cn/user-center/basic-information/interface-key', keyHelp: '在 MiniMax 开放平台的接口密钥页面创建；国际站在 platform.minimax.io。',
     drivers: ['mcode', 'claude-compat'],
   },
@@ -157,14 +216,56 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: 'cn', label: '按量（北京）', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3' },
       { id: 'coding', label: 'Coding Plan', baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3', compatUrl: 'https://ark.cn-beijing.volces.com/api/coding' },
     ],
-    models: [{ id: 'doubao-seed-2-1-pro-260915', note: '旗舰', ctx: 1_000_000 }, { id: 'doubao-seed-2-1-lite-260915', note: '快速', ctx: 1_000_000 }, { id: 'doubao-seed-evolving', note: '编程 · 最新' }],
-    cliModels: { 'claude-compat': [{ id: 'doubao-seed-evolving' }, { id: 'doubao-seed-2.1-pro', ctx: 1_000_000 }, { id: 'ark-code-latest', note: '控制台里切换' }] },
+    models: [
+      { id: 'doubao-seed-2-1-pro-260915', label: '豆包 Seed 2.1 Pro', note: '旗舰', ctx: 1_000_000 },
+      { id: 'doubao-seed-2-1-lite-260915', label: '豆包 Seed 2.1 Lite', note: '快速', ctx: 1_000_000 },
+      { id: 'doubao-seed-evolving', label: '豆包 Seed Evolving', note: '编程 · 最新' },
+    ],
+    cliModels: { 'claude-compat': [
+      { id: 'doubao-seed-evolving', label: '豆包 Seed Evolving', note: '编程 · 最新' },
+      { id: 'doubao-seed-2.1-pro', label: '豆包 Seed 2.1 Pro', note: '旗舰', ctx: 1_000_000 },
+      { id: 'ark-code-latest', label: '方舟 Coding Plan 当前模型', note: '在控制台里切换' },
+    ] },
     keyUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey', keyHelp: '在火山方舟控制台的 API Key 管理页创建，并在「开通管理」里开通要用的模型。用 Coding Plan 订阅时请选「Coding Plan」，按量地址不消耗套餐额度。',
     drivers: ['claude-compat'],
   },
 ];
 
 export const PROVIDER_BY_ID = Object.fromEntries(PROVIDERS.map((p) => [p.id, p])) as Record<ProviderId, ProviderInfo>;
+
+/** The catalog entry for a model id (API or any CLI list), ignoring a trailing [1m]. */
+export function modelInfo(p: ProviderInfo, model: string): ModelOption | undefined {
+  if (!model) return undefined;
+  const all = [...p.models, ...Object.values(p.cliModels).flat()].filter((m): m is ModelOption => !!m && !!m.id);
+  return all.find((m) => m.id === model) ?? all.find((m) => m.id.replace(/\[1m\]$/i, '') === model.replace(/\[1m\]$/i, '') && !!m.label);
+}
+
+/** 「Claude Sonnet 5.5」 for claude-sonnet-5-5 / sonnet[1m]; the id itself for models not in the catalog. */
+export function modelName(p: ProviderInfo, model: string): string {
+  return modelInfo(p, model)?.label ?? model;
+}
+
+/** 「1M 上下文」 style note for a model's window, when documented. */
+export function ctxLabel(tokens: number | undefined): string {
+  if (!tokens) return '';
+  // 1,050,000 reads as 1M, not 1.1M: round down to a tenth of a million.
+  return tokens >= 1_000_000 ? `${Math.floor(tokens / 100_000) / 10}M 上下文`.replace('.0M', 'M') : `${Math.round(tokens / 1000)}K 上下文`;
+}
+
+/** A CLI's own model name in the catalog's style: 「GPT-5.6-Sol」 → 「GPT-5.6 Sol」. */
+export function tidyModelLabel(label: string): string {
+  return label.replace(/^([A-Za-z]+-[\d.]+)-(?=[A-Za-z])/, '$1 ');
+}
+
+/** A CLI's English one-line description → a short note in the menu's words (or nothing). */
+export function shortModelNote(desc: string | undefined): string | undefined {
+  if (!desc) return undefined;
+  if (/older|previous|legacy/i.test(desc)) return '上一代';
+  if (/frontier|most capable|flagship|strongest/i.test(desc)) return '旗舰';
+  if (/fast|affordable|efficient|cheap|quick/i.test(desc)) return '快速';
+  if (/workhorse|balanced|general|everyday/i.test(desc)) return '主力';
+  return /[\u4e00-\u9fff]/.test(desc) && desc.length <= 12 ? desc : undefined;
+}
 
 export function defaultProviderConfig(p: ProviderInfo): ProviderConfig {
   const driver = p.drivers[0];
@@ -209,9 +310,10 @@ export function readiness(p: ProviderInfo, cfg: ProviderConfig, auth: 'api' | 'c
   return { ready: true };
 }
 
+/** 「Claude Sonnet 5.5 · Claude Code」, or 「GPT · Codex CLI」 when the tool picks the model. */
 export function engineLabel(p: ProviderInfo, auth: 'api' | 'cli', driver: DriverId | undefined, model: string) {
   const how = auth === 'api' ? 'API' : DRIVERS[driver ?? p.drivers[0]].label;
-  return `${p.name} · ${how}${model ? ` · ${model}` : ''}`;
+  return model ? `${modelName(p, model)} · ${how}` : `${p.name} · ${how}`;
 }
 
 /** CLI tool names → the workbench's tool categories (for icons, policies and approvals). */

@@ -56,6 +56,8 @@
 .console__latest { flex: 1; min-width: 0; gap: var(--sp-2); padding: 0 10px; color: var(--text-3); font-size: var(--fs-xs); text-align: left; }
 .console__latest .truncate { flex: 1; }
 .console__latest-time { flex: none; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+/* Which model the run uses: fixed size at the end of the bar and of the header. */
+.console__bar .engine-tag, .console__run .engine-tag { flex: none; }
 
 @container console (max-width: 700px) {
   .console__live-text, .console__toggle .kbd { display: none; }
@@ -89,7 +91,7 @@
   height: 14px;
   display: grid;
   place-items: center;
-  cursor: ns-resize;
+  cursor: var(--cur-ns-resize);
   touch-action: none;
   user-select: none;
 }
@@ -309,7 +311,6 @@
 .tool-call--running { --accent: var(--tone-running); }
 .tool-call--paused  { --accent: var(--tone-paused); }
 
-.tool-call__head { position: relative; }
 .tool-call__toggle {
   display: flex;
   align-items: center;
@@ -345,19 +346,6 @@
 .tool-call.is-open .tool-call__chev { transform: rotate(90deg); }
 @container tool-call (max-width: 540px) { .tool-call__agent { display: none; } }
 @container tool-call (max-width: 400px) { .tool-call__tool { display: none; } }
-
-/* Progress under the row: scaleX only, so it animates on the compositor. */
-.tool-call__progress { position: absolute; left: 3px; right: 0; bottom: 0; height: 2px; background: var(--line); pointer-events: none; }
-.tool-call__bar {
-  display: block;
-  width: 100%;
-  height: 100%;
-  transform-origin: 0 50%;
-  background: linear-gradient(90deg, var(--mint), var(--firefly));
-  box-shadow: 0 0 8px rgb(95 227 200 / 0.5);
-  transition: transform 260ms linear;
-}
-.tool-call--paused .tool-call__bar { background: var(--tone-paused); box-shadow: none; }
 
 /* Expanded region. */
 .tool-call__body {
@@ -477,7 +465,7 @@
 .err-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--tone-danger); pointer-events: none; }
 :root[data-mode="sam"] .err-card::before { width: 4px; }
 .err-card--fatal { border: 1px dashed color-mix(in srgb, var(--tone-danger) 55%, transparent); background: color-mix(in srgb, var(--tone-danger) 6%, var(--surface-strong)); }
-.err-card--recovered::before { background: var(--tone-success); }
+.err-card--continued::before { background: var(--tone-warning); }
 .err-card__head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .err-card__icon { flex: none; color: var(--tone-danger); }
 .err-card__title { min-width: 0; font-size: var(--fs-md); overflow-wrap: anywhere; }

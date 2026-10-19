@@ -1,5 +1,5 @@
 /* 待确认操作卡片：金色边 + 手形风险提示。状态面板里用紧凑版（预览折叠），工作区里用完整版。 */
-import { Check, ChevronDown, ChevronRight, FlaskConical, ShieldAlert, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ShieldAlert, X } from 'lucide-react';
 import { useId, useState, type MouseEvent } from 'react';
 import { relative } from '../../lib/format';
 import { useNow } from '../../lib/hooks';
@@ -7,7 +7,7 @@ import { APPROVAL_STATUS, RISK } from '../../lib/status';
 import type { Approval } from '../../lib/types';
 import { actions } from '../../state/actions';
 import { useApp } from '../../state/store';
-import { AgentAvatar, Badge, Button, CodeBlock, SimTag, StatusChip, cx } from '../ui';
+import { AgentAvatar, Badge, Button, CodeBlock, StatusChip, cx } from '../ui';
 
 export interface ApprovalCardProps {
   approval: Approval;
@@ -55,20 +55,17 @@ export function ApprovalCard({ approval, compact = false, showTask = false }: Ap
   const agent = useApp((s) => s.agents.find((a) => a.id === approval.agentId));
   const toolName = useApp((s) => s.tools.find((t) => t.id === approval.tool)?.name ?? approval.tool);
   const taskTitle = useApp((s) => (showTask ? s.tasks[approval.taskId]?.title : undefined));
-  const source = useApp((s) => s.runs[approval.runId]?.source ?? 'simulated');
   const now = useNow(30_000);
   const [open, setOpen] = useState(false);
   const baseId = useId();
   const titleId = `${baseId}-title`;
   const previewId = `${baseId}-preview`;
-  const simId = `${baseId}-sim`;
 
   const pending = approval.status === 'pending';
   const risk = RISK[approval.risk];
   const status = APPROVAL_STATUS[approval.status];
   const HeadIcon = pending ? ShieldAlert : status.icon;
   const previewVisible = !compact || open;
-  const simulated = source !== 'live';
 
   const decide = (decision: 'approve' | 'reject', e: MouseEvent<HTMLButtonElement>) => {
     const region = e.currentTarget.closest('aside, main');
@@ -87,7 +84,6 @@ export function ApprovalCard({ approval, compact = false, showTask = false }: Ap
       <header className="approval-card__head">
         <HeadIcon className="approval-card__icon" size={16} aria-hidden />
         <h3 className="approval-card__title" id={titleId}>{approval.title}</h3>
-        <SimTag source={source} />
       </header>
 
       <div className="approval-card__meta">
@@ -128,13 +124,6 @@ export function ApprovalCard({ approval, compact = false, showTask = false }: Ap
         />
       </div>
 
-      {pending && simulated && (
-        <p className="approval-card__sim" id={simId}>
-          <FlaskConical size={12} aria-hidden />
-          <span>模拟：批准后只会让模拟器继续，不会写入文件或执行命令。</span>
-        </p>
-      )}
-
       {pending ? (
         <div className="approval-card__actions">
           <Button
@@ -143,7 +132,6 @@ export function ApprovalCard({ approval, compact = false, showTask = false }: Ap
             icon={Check}
             data-approve
             aria-label={`批准「${approval.title}」`}
-            aria-describedby={simulated ? simId : undefined}
             onClick={(e) => decide('approve', e)}
           >
             批准
@@ -153,7 +141,6 @@ export function ApprovalCard({ approval, compact = false, showTask = false }: Ap
             size={compact ? 'sm' : 'md'}
             icon={X}
             aria-label={`拒绝「${approval.title}」`}
-            aria-describedby={simulated ? simId : undefined}
             onClick={(e) => decide('reject', e)}
           >
             拒绝
@@ -161,7 +148,7 @@ export function ApprovalCard({ approval, compact = false, showTask = false }: Ap
         </div>
       ) : (
         <div className="approval-card__decided">
-          <StatusChip meta={status} size="sm" label={simulated ? `${status.label}（模拟）` : undefined} />
+          <StatusChip meta={status} size="sm" />
           {approval.decidedAt != null && <span className="approval-card__time">{relative(approval.decidedAt, now)}</span>}
         </div>
       )}

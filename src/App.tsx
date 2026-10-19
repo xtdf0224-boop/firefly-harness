@@ -5,7 +5,6 @@ import { BootSplash } from './components/decor/BootSplash';
 import { PeekBar } from './components/decor/PeekBar';
 import { Wallpaper } from './components/decor/Wallpaper';
 import { Console } from './components/console/Console';
-import { ConnectionBanner } from './components/shell/ConnectionBanner';
 import { DialogHost, LiveRegion, ToastHost } from './components/shell/hosts';
 import { SideNav } from './components/shell/SideNav';
 import { StatusPanel } from './components/shell/StatusPanel';
@@ -26,7 +25,7 @@ import { store, useApp } from './state/store';
 const NAV_KEYS: Record<string, ViewId> = { '1': 'new', '2': 'tasks', '3': 'agents', '4': 'tools', '5': 'models', '6': 'history', '7': 'settings' };
 /** Page name for document.title; a task page uses the task's own title. */
 const VIEW_TITLES: Record<Exclude<ViewId, 'task'>, string> = {
-  new: '新建', tasks: '任务列表', agents: 'Agent', tools: '工具与连接', models: '模型接入', history: '运行历史', settings: '设置',
+  new: '新建', tasks: '任务列表', agents: 'Agent', tools: '工具与技能', models: '模型接入', history: '运行历史', settings: '设置',
 };
 
 export function App() {
@@ -51,6 +50,8 @@ export function App() {
   useEffect(() => { if (!narrow) actions.toggleStatusDrawer(false); }, [narrow]);
 
   useEffect(() => { document.documentElement.dataset.mode = mode; }, [mode]);
+  const themeCursor = useApp((s) => s.settings.themeCursor);
+  useEffect(() => { document.documentElement.dataset.cursor = themeCursor ? 'on' : 'off'; }, [themeCursor]);
   useEffect(() => {
     const root = document.documentElement;
     root.dataset.console = consoleOpen ? 'open' : 'closed';
@@ -120,7 +121,6 @@ export function App() {
       >
         <SideNav />
         <main id="main" className="app__main" tabIndex={-1}>
-          <ConnectionBanner />
           <div className="app__view" key={view}>{content}</div>
         </main>
         {narrow && drawerOpen && <div className="app__drawer-scrim" onClick={() => actions.toggleStatusDrawer(false)} aria-hidden />}

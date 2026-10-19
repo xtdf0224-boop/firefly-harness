@@ -1,9 +1,10 @@
-/* Small helpers shared by the workspace components: status mapping, durations and the one-shot
-   focus-request hook. Nothing here renders. */
+/* Small helpers shared by the workspace components: status mapping, durations, whether a task's
+   model can run right now, and the one-shot focus-request hook. Nothing here renders. */
 import { Circle } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { RUN_STATUS, STEP_STATUS, type StatusMeta } from '../../lib/status';
 import type { AppState, PlanStep, RunStatus } from '../../lib/types';
+import { engineChoices, type EngineChoice } from '../../state/models';
 import { useApp } from '../../state/store';
 
 /** Chip for a task that has no run yet. */
@@ -41,6 +42,20 @@ export function stepDuration(step: PlanStep, runRunning: boolean, now: number): 
   if (step.activeMs != null) return step.activeMs;
   if (step.endedAt != null) return Math.max(0, step.endedAt - step.startedAt);
   return runRunning && step.status === 'running' ? Math.max(0, now - step.startedAt) : undefined;
+}
+
+/** Can the task's own model run right now? 'ready': its way (key saved / CLI signed in) is set up;
+ *  'unavailable': it was, but is not any more; 'unset': the task never recorded a model. */
+export type EngineState = 'ready' | 'unavailable' | 'unset';
+
+const selectChoices = (s: AppState) => engineChoices(s.models);
+const sameChoices = (a: EngineChoice[], b: EngineChoice[]) => a.length === b.length && a.every((c, i) => c.key === b[i].key && c.label === b[i].label);
+
+export function useTaskEngine(taskId: string) {
+  const engine = useApp((s) => s.tasks[taskId]?.engine);
+  const choices = useApp(selectChoices, sameChoices);
+  const state: EngineState = !engine ? 'unset' : choices.some((c) => c.key === `${engine.provider}:${engine.auth}`) ? 'ready' : 'unavailable';
+  return { engine, choices, state };
 }
 
 type FocusTarget = NonNullable<AppState['focusRequest']>['target'];

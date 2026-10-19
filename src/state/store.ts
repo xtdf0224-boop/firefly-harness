@@ -26,13 +26,6 @@ export const store = {
     afterUpdate?.(next, prev);
     listeners.forEach((l) => l());
   },
-  /** Swap in a whole new state (used by 重置演示数据). */
-  replace(next: AppState) {
-    const prev = state;
-    state = next;
-    afterUpdate?.(next, prev);
-    listeners.forEach((l) => l());
-  },
   subscribe(listener: Listener) {
     listeners.add(listener);
     return () => { listeners.delete(listener); };

@@ -1,15 +1,18 @@
 /* 右侧运行状态面板：运行、活跃 Agent、模型、上下文、Token、待确认操作。
-   每个分区自己订阅所需的最小切片，所以引擎每秒 5 次提交运行时间时只有「运行」分区重绘。 */
-import { CheckCircle2, PauseCircle, Radar, TriangleAlert, X } from 'lucide-react';
+   每个分区自己订阅所需的最小切片，所以运行时间每秒走字、回复一个字一个字流出来时，只有对应的分区重绘。 */
+import { CheckCircle2, Cpu, PauseCircle, Radar, TriangleAlert, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref } from 'react';
+import { EFFORT_LABEL } from '../../lib/effort';
 import { clock, percent, tokens } from '../../lib/format';
 import { useMedia, useNow, useReducedMotion } from '../../lib/hooks';
-import { AGENT_ACTIVITY, CONNECTION_STATUS, RUN_STATUS, isOpenRun } from '../../lib/status';
-import type { AgentId, AppState, Approval, Run, Tone } from '../../lib/types';
+import { DRIVERS, PROVIDER_BY_ID, contextOf, modelName, readiness } from '../../lib/providers';
+import { AGENT_ACTIVITY, RUN_STATUS, isOpenRun } from '../../lib/status';
+import type { AgentId, AppState, Approval, Run, TaskEngine, Tone } from '../../lib/types';
 import { actions } from '../../state/actions';
-import { agentActivity, currentRun, gateway, openRuns, pendingApprovals, runLabel, stepProgress, wallMs } from '../../state/selectors';
+import { defaultChoice, engineChoices } from '../../state/models';
+import { agentActivity, currentRun, openRuns, pendingApprovals, runLabel, stepProgress, wallMs } from '../../state/selectors';
 import { shallow, useApp } from '../../state/store';
-import { AgentAvatar, Badge, EmptyState, IconButton, Meter, EngineTag, SimTag, Sparkline, StatusChip, cx } from '../ui';
+import { AgentAvatar, Badge, Button, EmptyState, IconButton, Meter, Sparkline, StatusChip, cx } from '../ui';
 import { ApprovalCard } from './ApprovalCard';
 import { DRAWER_QUERY } from './queries';
 
@@ -17,7 +20,6 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), texta
 
 const PAUSE_REASON: Record<NonNullable<Run['pauseReason']>, string> = {
   user: '你暂停了运行',
-  disconnected: '连接断开后自动暂停',
   reload: '页面重新载入后暂停',
 };
 
@@ -93,7 +95,6 @@ function RunSection({ runId, taskView, viewTaskId }: { runId: string; taskView: 
             <StatusChip meta={meta} size="lg" glow={false} />
           </span>
           <span className="status-panel__runno">{runLabel(run)}</span>
-          <SimTag source={run.source} />
         </div>
         {run.status === 'paused' && run.pauseReason && (
           <p className="status-panel__note">
@@ -132,11 +133,11 @@ function RunSection({ runId, taskView, viewTaskId }: { runId: string; taskView: 
 
 function AgentRow({ runId, agentId }: { runId: string; agentId: AgentId }) {
   const agent = useApp((s) => s.agents.find((a) => a.id === agentId));
-  // Real runs: every agent runs on the task's model, not the demo roster's configured one.
-  const engineModel = useApp((s) => {
+  // An agent with its own model shows that one (the run keeps a snapshot); everyone else runs on the task's.
+  const engineText = useApp((s) => {
     const r = s.runs[runId];
-    const e = r?.source === 'live' ? s.tasks[r.taskId]?.engine : undefined;
-    return e ? (e.model || e.label) : undefined;
+    const e = r ? r.agentEngines?.[agentId] ?? s.tasks[r.taskId]?.engine : undefined;
+    return e ? engineSummary(e) : undefined;
   });
   const activity = useApp((s) => agentActivity(s, s.runs[runId], agentId));
   const liveText = useApp((s) => {
@@ -154,7 +155,7 @@ function AgentRow({ runId, agentId }: { runId: string; agentId: AgentId }) {
           <StatusChip meta={meta} size="sm" />
         </div>
         <p className="status-panel__agent-text">{liveText ?? '待命'}</p>
-        <p className="status-panel__agent-model">{engineModel ?? agent.model}</p>
+        {engineText && <p className="status-panel__agent-model">{engineText}</p>}
       </div>
     </li>
   );
@@ -174,52 +175,103 @@ function AgentSection({ runId }: { runId: string }) {
 
 /* ───────────── 模型 ───────────── */
 
+/** What a model block needs to know about a way of running: a task's engine or the default choice. */
+type EngineFacts = Pick<TaskEngine, 'provider' | 'auth' | 'driver' | 'model' | 'effort'> & { cwd?: string };
+
+/** 「Claude Code」 or 「API 密钥」. */
+function wayName(e: EngineFacts) {
+  return e.auth === 'api' ? 'API 密钥' : DRIVERS[e.driver ?? PROVIDER_BY_ID[e.provider].drivers[0]].label;
+}
+
+/** The model's version name; 「默认（Claude Code 自己选）」 when the tool picks it. */
+function modelText(e: EngineFacts) {
+  if (e.model) return modelName(PROVIDER_BY_ID[e.provider], e.model);
+  return e.auth === 'api' ? PROVIDER_BY_ID[e.provider].name : `默认（${wayName(e)} 自己选）`;
+}
+
+/** One line for an agent row: 「Claude Sonnet 5.5 · Claude Code · 强度 高」. */
+function engineSummary(e: EngineFacts) {
+  const model = e.model ? modelName(PROVIDER_BY_ID[e.provider], e.model) : e.auth === 'api' ? PROVIDER_BY_ID[e.provider].name : '';
+  return [model, wayName(e) + (model ? '' : ' · 默认模型'), e.effort && `强度 ${EFFORT_LABEL[e.effort]}`].filter(Boolean).join(' · ');
+}
+
+function EngineFactsList({ engine }: { engine: EngineFacts }) {
+  const ctx = contextOf(PROVIDER_BY_ID[engine.provider], engine.model);
+  return (
+    <>
+      <dl className="kv">
+        <dt>服务</dt>
+        <dd>{PROVIDER_BY_ID[engine.provider].name}</dd>
+        <dt>方式</dt>
+        <dd>{wayName(engine)}</dd>
+        <dt>模型</dt>
+        <dd className="status-panel__model">{modelText(engine)}</dd>
+        <dt>推理强度</dt>
+        <dd>{engine.effort ? EFFORT_LABEL[engine.effort] : '默认'}</dd>
+        <dt>上下文窗口</dt>
+        <dd className="mono">{ctx.known ? '' : '约 '}{tokens(ctx.tokens)}</dd>
+      </dl>
+      {engine.cwd && <p className="status-panel__muted mono truncate" title={engine.cwd}>{engine.cwd}</p>}
+    </>
+  );
+}
+
 function ModelSection() {
+  const taskOpen = useApp((s) => s.view === 'task' && !!s.selectedTaskId && !!s.tasks[s.selectedTaskId]);
   const engine = useApp((s) => (s.view === 'task' && s.selectedTaskId ? s.tasks[s.selectedTaskId]?.engine : undefined));
-  if (engine) {
+  const models = useApp((s) => s.models);
+
+  if (taskOpen) {
+    if (!engine) {
+      return (
+        <Section title="模型">
+          <p className="status-panel__alert"><TriangleAlert size={14} aria-hidden /><span>这个任务还没有设置模型。</span></p>
+          <Button size="sm" variant="secondary" icon={Cpu} onClick={() => actions.navigate('models')}>去模型接入</Button>
+        </Section>
+      );
+    }
+    // The way it was set up with may have lost its login or key since.
+    const usable = engineChoices(models).some((c) => c.key === `${engine.provider}:${engine.auth}`);
+    if (!usable) {
+      const reason = readiness(PROVIDER_BY_ID[engine.provider], models.providers[engine.provider], engine.auth).reason;
+      return (
+        <Section title="模型">
+          <p className="status-panel__alert">
+            <TriangleAlert size={14} aria-hidden />
+            <span>这个任务用的「{PROVIDER_BY_ID[engine.provider].name} · {wayName(engine)}」现在用不了{reason ? `：${reason}` : ''}。</span>
+          </p>
+          <EngineFactsList engine={engine} />
+          <Button size="sm" variant="secondary" icon={Cpu} onClick={() => actions.navigate('models')}>去模型接入</Button>
+        </Section>
+      );
+    }
     return (
-      <Section title="模型" right={<EngineTag label={engine.label} compact />}>
-        <dl className="kv">
-          <dt>服务</dt>
-          <dd>{engine.label.split(' · ')[0]}</dd>
-          <dt>方式</dt>
-          <dd>{engine.auth === 'api' ? 'API 密钥' : engine.label.split(' · ')[1] ?? '命令行'}</dd>
-          <dt>模型</dt>
-          <dd className="mono status-panel__model">{engine.model || '工具默认'}</dd>
-        </dl>
-        {engine.cwd && <p className="status-panel__muted mono truncate" title={engine.cwd}>{engine.cwd}</p>}
+      <Section title="模型">
+        <EngineFactsList engine={engine} />
       </Section>
     );
   }
-  return <GatewaySection />;
-}
 
-function GatewaySection() {
-  const gw = useApp(gateway);
-  const model = useApp((s) => s.agents.find((a) => a.id === 'orchestrator')?.model);
-  // No gateway configured also means nothing real is being called.
-  const simulated = !gw || gw.simulated;
+  const choice = defaultChoice(models);
+  if (!choice) {
+    return (
+      <Section title="模型">
+        <EmptyState
+          compact
+          icon={Cpu}
+          title="还没有接入模型"
+          body="用命令行工具登录，或填一个 API 密钥，就能开始对话和任务。"
+          actions={<Button size="sm" variant="secondary" onClick={() => actions.navigate('models')}>去模型接入</Button>}
+        />
+      </Section>
+    );
+  }
   return (
-    <Section title="模型" right={gw ? <SimTag source={gw.simulated ? 'simulated' : 'live'} /> : undefined}>
-      <dl className="kv">
-        {gw ? (
-          <>
-            <dt>{gw.name}</dt>
-            <dd><StatusChip meta={CONNECTION_STATUS[gw.status]} size="sm" /></dd>
-            <dt>延迟</dt>
-            <dd className="mono">{gw.latencyMs != null ? `${gw.latencyMs} ms` : '—'}</dd>
-          </>
-        ) : (
-          <>
-            <dt>模型网关</dt>
-            <dd>未配置</dd>
-          </>
-        )}
-        <dt>主模型</dt>
-        <dd className="mono status-panel__model">{model ?? '—'}</dd>
-      </dl>
-      {gw?.detail && <p className="status-panel__muted">{gw.detail}</p>}
-      {simulated && <p className="status-panel__muted">演示模式不调用模型</p>}
+    <Section title="模型" right={<Badge tone="neutral">新任务默认</Badge>}>
+      <EngineFactsList engine={choice} />
+      <p className="status-panel__muted">
+        新任务先用这个。可以在<button type="button" className="shell-link" onClick={() => actions.navigate('models')}>模型接入</button>里更改。
+      </p>
     </Section>
   );
 }
@@ -228,21 +280,24 @@ function GatewaySection() {
 
 function ContextSection({ runId }: { runId: string }) {
   const usage = useApp((s) => s.runs[runId]?.usage);
-  const cli = useApp((s) => { const r = s.runs[runId]; return r?.source === 'live' && s.tasks[r.taskId]?.engine?.auth === 'cli'; });
-  const source = useApp((s) => s.runs[runId]?.source ?? 'simulated');
+  const cli = useApp((s) => { const r = s.runs[runId]; return !!r && s.tasks[r.taskId]?.engine?.auth === 'cli'; });
   if (!usage) return null;
   if (!usage.contextLimit || (cli && !usage.contextUsed)) {
     return (
-      <Section title="上下文" right={<SimTag source={source} compact />}>
-        <p className="status-panel__figure"><span className="mono tabular">窗口 {tokens(usage.contextLimit || 1_000_000)}</span></p>
-        <p className="status-panel__muted">这个命令行 Agent 不报告每次请求的上下文用量，由它自己管理和压缩。</p>
+      <Section title="上下文">
+        <p className="status-panel__figure">
+          {usage.contextLimit ? <span className="mono tabular">窗口 {tokens(usage.contextLimit)}</span> : <span>窗口大小未知</span>}
+        </p>
+        <p className="status-panel__muted">
+          {cli ? '这个命令行 Agent 不报告每次请求的上下文用量，由它自己管理和压缩。' : '这个模型没有报告上下文用量。'}
+        </p>
       </Section>
     );
   }
   const pct = percent(usage.contextUsed, usage.contextLimit);
   const tone: Tone = pct > 90 ? 'danger' : pct > 75 ? 'warning' : 'running';
   return (
-    <Section title="上下文" right={<SimTag source={source} compact />}>
+    <Section title="上下文">
       <Meter value={usage.contextUsed} max={usage.contextLimit} label="上下文使用量" tone={tone} segments={24} valueText={`已使用 ${pct}%`} />
       <p className="status-panel__figure">
         <span className="mono tabular">{tokens(usage.contextUsed)} / {tokens(usage.contextLimit)}</span>
@@ -261,7 +316,6 @@ function ContextSection({ runId }: { runId: string }) {
 
 function TokenSection({ runId }: { runId: string }) {
   const usage = useApp((s) => s.runs[runId]?.usage);
-  const source = useApp((s) => s.runs[runId]?.source ?? 'simulated');
   if (!usage) return null;
   const stats: Array<[string, number, boolean?]> = [
     ['输入', usage.inputTokens],
@@ -270,7 +324,7 @@ function TokenSection({ runId }: { runId: string }) {
     ['合计', usage.inputTokens + usage.outputTokens, true],
   ];
   return (
-    <Section title="Token 消耗" right={<SimTag source={source} />}>
+    <Section title="Token 消耗">
       <dl className="status-panel__stats">
         {stats.map(([label, value, strong]) => (
           <div key={label} className={cx('status-panel__stat', strong && 'is-total')}>
@@ -280,7 +334,6 @@ function TokenSection({ runId }: { runId: string }) {
         ))}
       </dl>
       <Sparkline values={usage.series} label="Token 累计曲线" width={282} height={36} />
-      {source !== 'live' && <p className="status-panel__muted">{source === 'sample' ? '示例数据' : '模拟计量'}，不对应真实账单</p>}
     </Section>
   );
 }
@@ -414,7 +467,7 @@ export function StatusPanel() {
         ) : (
           <Section title="运行">
             {taskView && chatView ? (
-              <EmptyState compact icon={Radar} title="闲聊没有运行" body="闲聊只是对话，不会读写文件或执行命令。要动手做事，新建一个「工作」。" />
+              <EmptyState compact icon={Radar} title="闲聊没有运行" body="闲聊只是对话，不会改动你的文件。要动手做事，新建一个「工作」。" />
             ) : taskView ? (
               <EmptyState compact icon={Radar} title="这个任务还没有运行" body="在工作区点「开始」后，这里会显示运行状态。" />
             ) : (

@@ -251,7 +251,7 @@ function codexModels(exe) {
     });
     child.on('error', () => finish(null));
     child.on('close', () => finish(null));
-    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name: 'FireflyHarness', title: '萤火', version: '0.2.0' } } });
+    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name: 'FireflyHarness', title: '萤火', version: '2.0.0' } } });
   });
 }
 
@@ -303,23 +303,36 @@ function openLogin({ driver, path: custom }) {
   const exe = exeFor(driver, custom);
   if (!exe) return { ok: false, error: `找不到 ${d.bin} 命令` };
   if (!isWin) return { ok: false, error: `请在终端运行：${d.bin} ${d.login.join(' ')}` };
-  // A small batch file in a visible console: the user signs in there themselves.
-  const file = path.join(os.tmpdir(), `firefly-login-${driver}.cmd`);
-  const lines = [
-    '@echo off',
-    'chcp 65001 >nul',
-    `title ${d.label} 登录 - 萤火`,
-    `echo ${d.loginHint}`,
-    'echo 完成后关闭这个窗口，回到萤火点「检测」。',
-    'echo.',
-    `call "${exe}" ${d.login.join(' ')}`,
-    'echo.',
-    'pause',
-  ];
-  fs.writeFileSync(file, `${lines.join('\r\n')}\r\n`, 'utf8');
-  const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `start "" "${file}"`], { windowsVerbatimArguments: true, detached: true, stdio: 'ignore', windowsHide: false });
+  // A small PowerShell script in a visible console: the user signs in there themselves. Not a .cmd:
+  // cmd.exe reads batch files by byte offset, so Chinese lines after `chcp 65001` come out garbled
+  // and half a line can even run as a command.
+  const file = path.join(os.tmpdir(), `firefly-login-${driver}.ps1`);
+  fs.writeFileSync(file, loginScript(d, exe), 'utf8');
+  const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `start "" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${file}"`], { windowsVerbatimArguments: true, detached: true, stdio: 'ignore', windowsHide: false });
   child.unref();
   return { ok: true, command: `${d.bin} ${d.login.join(' ')}` };
+}
+
+/** The login window's script: UTF-8 with a BOM (what Windows PowerShell 5.1 needs), every value a
+    single-quoted literal so nothing in a path or a hint can run as code. */
+function loginScript(d, exe) {
+  const ps = (s) => `'${String(s).replace(/'/g, "''")}'`;
+  const lines = [
+    '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
+    `$Host.UI.RawUI.WindowTitle = ${ps(`${d.label} 登录 - 萤火`)}`,
+    `Write-Host ${ps(d.loginHint)} -ForegroundColor Cyan`,
+    `Write-Host ${ps('完成后关闭这个窗口，回到萤火点「检测」。')}`,
+    'Write-Host',
+    `& ${ps(exe)} ${d.login.map(ps).join(' ')}`,
+    '$code = $LASTEXITCODE',
+    'Write-Host',
+    `if ($code -eq 0) { Write-Host ${ps('登录命令已结束。上面显示已登录（Logged in）的话，就可以关闭窗口，回到萤火点「检测」。')} -ForegroundColor Green }`,
+    `else { Write-Host (${ps('登录命令退出（代码 ')} + $code + ${ps('）。如果上面已经显示登录成功，可以忽略；否则请再试一次。')}) -ForegroundColor Yellow }`,
+    `Write-Host ${ps('提示：命令结束时如果出现 Assertion failed 之类的英文，是这个命令行工具退出时自己的提示，不影响登录结果。')} -ForegroundColor DarkGray`,
+    'Write-Host',
+    `[void](Read-Host ${ps('按回车关闭这个窗口')})`,
+  ];
+  return `\uFEFF${lines.join('\r\n')}\r\n`;
 }
 
 /** A tiny round trip that proves the connection works. */

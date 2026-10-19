@@ -1,15 +1,15 @@
 /* Header panel of the workspace: back link, run selector, drawer button, task title + run status,
    run controls and the compact run meta (time · steps · tokens). */
-import { ArrowLeft, Clock3, FolderOpen, PanelRight } from 'lucide-react';
+import { ArrowLeft, Clock3, FolderOpen, History, PanelRight } from 'lucide-react';
 import { desktop } from '../../lib/desktop';
-import { useId } from 'react';
 import { clock, tokens } from '../../lib/format';
 import { useMedia } from '../../lib/hooks';
 import { RUN_STATUS } from '../../lib/status';
 import { actions } from '../../state/actions';
 import { pendingApprovals } from '../../state/selectors';
 import { shallow, useApp } from '../../state/store';
-import { Badge, Button, EngineTag, IconButton, SimTag, StatusChip } from '../ui';
+import { Badge, Button, EngineTag, IconButton, StatusChip } from '../ui';
+import { MenuSelect } from '../ui/MenuSelect';
 import { RunControls } from './RunControls';
 import { NO_RUN_META, stepCounts } from './shared';
 
@@ -26,7 +26,7 @@ export interface RunHeaderProps {
 export function RunHeader({ taskId, runId, latestId }: RunHeaderProps) {
   const task = useApp((s) => {
     const t = s.tasks[taskId];
-    return t ? { title: t.title, source: t.source, runs: t.runIds.length, engine: t.engine?.label, cwd: t.engine?.cwd } : undefined;
+    return t ? { title: t.title, runs: t.runIds.length, engine: t.engine?.label, cwd: t.engine?.cwd } : undefined;
   }, shallow);
   // Primitives only: seconds instead of ms keeps the header at ~1 render per second while running.
   const run = useApp((s) => {
@@ -34,7 +34,7 @@ export function RunHeader({ taskId, runId, latestId }: RunHeaderProps) {
     if (!r) return undefined;
     const { done, skipped, total } = stepCounts(r.plan);
     return {
-      status: r.status, attempt: r.attempt, source: r.source, sec: Math.floor(r.activeMs / 1000),
+      status: r.status, attempt: r.attempt, engine: r.engineLabel, sec: Math.floor(r.activeMs / 1000),
       done, skipped, total, planReady: r.planReady, tokens: r.usage.inputTokens + r.usage.outputTokens,
     };
   }, shallow);
@@ -48,6 +48,8 @@ export function RunHeader({ taskId, runId, latestId }: RunHeaderProps) {
   if (!task) return null;
   const meta = run ? RUN_STATUS[run.status] : NO_RUN_META;
   const historic = !!run && !!latestId && runId !== latestId;
+  // The viewed run's model wins: an older run may have used another one than the task has now.
+  const engine = run?.engine ?? task.engine;
 
   return (
     <section className="panel ws-header" aria-label="任务概览" data-run={run?.status ?? 'draft'} data-live={run?.status === 'running' ? 'true' : undefined}>
@@ -55,8 +57,7 @@ export function RunHeader({ taskId, runId, latestId }: RunHeaderProps) {
         <div className="panel__heading">
           <IconButton icon={ArrowLeft} label="返回任务列表" onClick={() => actions.navigate('tasks')} />
           <span className="label">任务</span>
-          {/* The viewed run's provenance wins: a retry of a sample task is a simulated run. */}
-          {task.engine && (run?.source ?? task.source) === 'live' ? <EngineTag label={task.engine} /> : <SimTag source={run?.source ?? task.source} />}
+          {engine && <EngineTag label={engine} />}
         </div>
         <div className="panel__actions ws-header__tools">
           {task.cwd && desktop && (
@@ -98,9 +99,8 @@ export function RunHeader({ taskId, runId, latestId }: RunHeaderProps) {
                   {run.planReady && run.skipped > 0 && <span className="ws-meta__skip"> · {run.skipped} 步已跳过</span>}
                 </dd>
               </div>
-              <div><dt>Token</dt><dd>{tokens(run.tokens)}</dd></div>
+              <div><dt>Token</dt><dd>{run.tokens > 0 ? tokens(run.tokens) : '—'}</dd></div>
             </dl>
-            <SimTag source={run.source} compact />
           </div>
         )}
       </div>
@@ -118,27 +118,16 @@ export function RunHeader({ taskId, runId, latestId }: RunHeaderProps) {
   );
 }
 
-/** Native select of the task's runs, newest first. */
+/** The task's runs, newest first, in the app's own menu. */
 function RunSelect({ taskId, value }: { taskId: string; value: string }) {
-  const id = useId();
   // "runId|attempt|status" strings compare shallowly, so the list does not re-render every tick.
   const items = useApp((s) => s.tasks[taskId]?.runIds
     .map((rid) => { const r = s.runs[rid]; return r ? `${rid}|${r.attempt}|${r.status}` : ''; })
     .filter(Boolean)
     .reverse() ?? NO_ITEMS, shallow);
-  return (
-    <div className="ws-run-select">
-      <label className="sr-only" htmlFor={id}>查看运行</label>
-      <select id={id} className="select" value={value} onChange={(e) => actions.selectRun(e.target.value)}>
-        {items.map((item, i) => {
-          const [rid, attempt, status] = item.split('|');
-          return (
-            <option key={rid} value={rid}>
-              {`运行 #${attempt} · ${RUN_STATUS[status as keyof typeof RUN_STATUS].label}${i === 0 ? ' · 最新' : ''}`}
-            </option>
-          );
-        })}
-      </select>
-    </div>
-  );
+  const options = items.map((item, i) => {
+    const [rid, attempt, status] = item.split('|');
+    return { value: rid, label: `运行 #${attempt}`, sub: i === 0 ? '最新' : undefined, meta: RUN_STATUS[status as keyof typeof RUN_STATUS].label };
+  });
+  return <MenuSelect variant="chip" icon={History} label="查看运行" value={value} options={options} onChange={actions.selectRun} search={false} minWidth={200} />;
 }

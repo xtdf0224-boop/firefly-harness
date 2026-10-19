@@ -1,15 +1,15 @@
 /* One expandable tool call. Used by the console list and by the workspace steps view.
    A disclosure row (status · tool · title · agent · duration) over a details region with the
-   input, output, error and call metadata. All data shown here comes from the simulator unless the
-   call says otherwise, so every output block carries a SimTag. */
+   input, output, error and call metadata. */
 import { ArrowRight, ChevronRight, Hand, PauseCircle, RotateCcw, XOctagon } from 'lucide-react';
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { duration, json, timeOfDay } from '../../lib/format';
+import { useNow } from '../../lib/hooks';
 import { TOOL_STATUS, type StatusMeta } from '../../lib/status';
-import type { DataSource, ToolCall } from '../../lib/types';
+import type { ToolCall } from '../../lib/types';
 import { actions } from '../../state/actions';
 import { shallow, useApp } from '../../state/store';
-import { Badge, CodeBlock, SimTag, StatusChip, cx } from '../ui';
+import { Badge, CodeBlock, StatusChip, cx } from '../ui';
 
 export interface ToolCallItemProps {
   call: ToolCall;
@@ -60,23 +60,19 @@ function ToolCallItemView({ call, defaultOpen = false, showStep = false, paused 
 
   const running = call.status === 'running';
   const ctx = useApp((s) => {
-    const run = s.runs[call.runId];
-    const step = showStep ? run?.plan.find((p) => p.id === call.stepId) : undefined;
-    /* Live progress is the simulator's own position in the beat (simulated ms spent so far), not a
-       wall-clock estimate: it holds still while paused, survives a remount or reload, and follows
-       the simulation speed. Only the call the cursor is on can be running. */
-    const current = running && run ? run.plan[run.cursor.step]?.toolCallIds.at(-1) === call.id : false;
+    const step = showStep ? s.runs[call.runId]?.plan.find((p) => p.id === call.stepId) : undefined;
     return {
       agent: s.agents.find((a) => a.id === call.agentId)?.name ?? call.agentId,
-      source: (call.simulated ? (run?.source === 'sample' ? 'sample' : 'simulated') : 'live') as DataSource,
       stepNo: step ? step.index + 1 : 0,
       stepTitle: step?.title ?? '',
-      elapsed: current && run ? run.cursor.beatElapsed : undefined,
     };
   }, shallow);
 
-  const elapsed = ctx.elapsed != null && call.expectedMs ? Math.min(ctx.elapsed, call.expectedMs) : ctx.elapsed;
-  const ratio = elapsed != null && call.expectedMs ? Math.min(1, elapsed / call.expectedMs) : undefined;
+  // A running call has no duration yet: count up from its start. A paused run stops the clock, and
+  // the call's time is not known until it resumes.
+  const ticking = running && !paused;
+  const now = useNow(1000, ticking);
+  const elapsed = ticking ? Math.max(0, now - call.startedAt) : undefined;
 
   const meta = running && paused ? PAUSED_META : TOOL_STATUS[call.status];
   const accent: Accent = call.status === 'error' ? 'danger'
@@ -99,15 +95,10 @@ function ToolCallItemView({ call, defaultOpen = false, showStep = false, paused 
           <span className="tool-call__time">{timeText}</span>
           <ChevronRight className="tool-call__chev" size={14} aria-hidden />
         </button>
-        {ratio != null && (
-          <span className="tool-call__progress" aria-hidden>
-            <span className="tool-call__bar" style={{ transform: `scaleX(${ratio})` }} />
-          </span>
-        )}
       </div>
       <div id={regionId} role="region" aria-label={`${call.title} 的调用详情`} className="tool-call__body" hidden={!open}>
         {open && (
-          <Details call={call} source={ctx.source} timeText={timeText}
+          <Details call={call} timeText={timeText}
             stepLabel={showStep && ctx.stepNo ? `第 ${ctx.stepNo} 步 · ${ctx.stepTitle}` : undefined} />
         )}
       </div>
@@ -120,13 +111,13 @@ export const ToolCallItem = memo(ToolCallItemView);
 
 /* ───────────── details ───────────── */
 
-function Details({ call, source, timeText, stepLabel }: { call: ToolCall; source: DataSource; timeText: string; stepLabel?: string }) {
+function Details({ call, timeText, stepLabel }: { call: ToolCall; timeText: string; stepLabel?: string }) {
   const err = call.error;
   return (
     <>
       <div className="tool-call__io">
         <CodeBlock code={json(call.input)} language="json" caption="输入 · JSON" maxHeight={220} wrap />
-        <Output call={call} source={source} />
+        <Output call={call} />
       </div>
 
       {err && (
@@ -138,7 +129,7 @@ function Details({ call, source, timeText, stepLabel }: { call: ToolCall; source
               <span>{err.message}</span>
             </p>
             <p className="callout__text tool-call__error-note">
-              {err.recoverable ? <><RotateCcw size={12} aria-hidden />Agent 已自动重试</> : '导致步骤失败'}
+              {err.recoverable ? <><RotateCcw size={12} aria-hidden />这次调用失败，Agent 继续往下执行</> : '导致步骤失败'}
             </p>
             {err.detail && <CodeBlock code={err.detail} caption="错误详情" maxHeight={180} wrap className="tool-call__detail" />}
           </div>
@@ -179,12 +170,11 @@ function MetaItem({ label, mono, children }: { label: string; mono?: boolean; ch
   );
 }
 
-function Output({ call, source }: { call: ToolCall; source: DataSource }) {
-  const tag = <SimTag source={source} compact />;
+function Output({ call }: { call: ToolCall }) {
   switch (call.status) {
     case 'running':
       return (
-        <Placeholder tag={tag}>
+        <Placeholder>
           <span className="tool-call__skel" style={{ width: '92%' }} aria-hidden />
           <span className="tool-call__skel" style={{ width: '68%' }} aria-hidden />
           <span className="tool-call__skel" style={{ width: '44%' }} aria-hidden />
@@ -192,29 +182,28 @@ function Output({ call, source }: { call: ToolCall; source: DataSource }) {
         </Placeholder>
       );
     case 'awaiting':
-      return <Placeholder tag={tag}><span className="tool-call__ph-text">尚未执行，批准后才会产生输出。</span></Placeholder>;
+      return <Placeholder><span className="tool-call__ph-text">尚未执行，批准后才会产生输出。</span></Placeholder>;
     case 'denied':
       return (
-        <Placeholder tag={tag}>
+        <Placeholder>
           <span className="tool-call__ph-text">已拒绝，未执行</span>
           {call.output && <span className="tool-call__ph-sub">{call.output}</span>}
         </Placeholder>
       );
     case 'cancelled':
-      return <Placeholder tag={tag}><span className="tool-call__ph-text">运行取消时中止</span></Placeholder>;
+      return <Placeholder><span className="tool-call__ph-text">运行取消时中止</span></Placeholder>;
     default:
       return call.output
-        ? <CodeBlock code={call.output} caption="输出" tag={tag} maxHeight={220} wrap />
-        : <Placeholder tag={tag}><span className="tool-call__ph-text">没有输出</span></Placeholder>;
+        ? <CodeBlock code={call.output} caption="输出" maxHeight={220} wrap />
+        : <Placeholder><span className="tool-call__ph-text">没有输出</span></Placeholder>;
   }
 }
 
-function Placeholder({ tag, children }: { tag: ReactNode; children: ReactNode }) {
+function Placeholder({ children }: { children: ReactNode }) {
   return (
     <figure className="code tool-call__ph">
       <figcaption className="code__bar">
         <span className="code__lang">输出</span>
-        <span className="code__tools">{tag}</span>
       </figcaption>
       <div className="tool-call__ph-body">{children}</div>
     </figure>

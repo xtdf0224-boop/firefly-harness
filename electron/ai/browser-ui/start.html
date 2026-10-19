@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; form-action https:">
+<title>起始页</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #080d18; --panel: rgb(15 24 41 / 0.86); --line: rgb(168 222 214 / 0.14); --line-strong: rgb(168 230 216 / 0.34);
+    --text: #e6eef2; --text-2: #b9c8d2; --text-3: #8fa3b3; --mint: #5fe3c8; --mint-soft: rgb(95 227 200 / 0.14); --firefly: #b5f26b;
+    font-family: "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+  body {
+    display: grid; place-items: center; min-height: 100vh; padding: 48px 20px;
+    background:
+      radial-gradient(60% 50% at 50% 0%, rgb(95 227 200 / 0.12), transparent 70%),
+      radial-gradient(40% 40% at 80% 90%, rgb(181 242 107 / 0.08), transparent 70%),
+      var(--bg);
+  }
+  main { width: min(640px, 100%); display: flex; flex-direction: column; gap: 22px; }
+  h1 { margin: 0; display: flex; align-items: center; gap: 12px; font-size: 26px; font-weight: 600; letter-spacing: 0.04em; }
+  h1 i { width: 10px; height: 10px; border-radius: 50%; background: var(--firefly); box-shadow: 0 0 14px var(--firefly); }
+  p { margin: 0; color: var(--text-2); line-height: 1.7; }
+  form { display: flex; gap: 8px; }
+  input { flex: 1; min-width: 0; height: 44px; padding: 0 16px; border: 1px solid var(--line-strong); border-radius: 999px; background: rgb(5 9 17 / 0.6); color: var(--text); font: inherit; font-size: 15px; outline: none; }
+  input:focus { box-shadow: 0 0 0 3px var(--mint-soft); border-color: var(--mint); }
+  button { height: 44px; padding: 0 20px; border: 0; border-radius: 999px; background: var(--mint); color: #04201b; font: inherit; font-weight: 600; cursor: pointer; }
+  .links { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+  .links a { display: block; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); text-decoration: none; }
+  .links a:hover { border-color: var(--line-strong); background: rgb(21 32 54 / 0.9); }
+  .links small { display: block; margin-top: 2px; color: var(--text-3); font-size: 12px; }
+  ul { margin: 0; padding: 14px 18px 14px 34px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text-2); line-height: 1.8; font-size: 13px; }
+  strong { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1><i></i>萤火浏览器</h1>
+  <p>这是 Agent 和你共用的浏览器窗口。开启「浏览器」的工作任务会在这里打开网页、读取内容、点击和输入，你可以随时看着它做，也可以自己接管。</p>
+  <form action="https://cn.bing.com/search" method="get">
+    <input name="q" type="search" placeholder="搜索，或在上方地址栏输入网址" aria-label="搜索" autofocus>
+    <button type="submit">搜索</button>
+  </form>
+  <nav class="links" aria-label="常用网站">
+    <a href="https://cn.bing.com/">必应<small>cn.bing.com</small></a>
+    <a href="https://www.baidu.com/">百度<small>baidu.com</small></a>
+    <a href="https://github.com/">GitHub<small>github.com</small></a>
+    <a href="https://www.zhihu.com/">知乎<small>zhihu.com</small></a>
+    <a href="https://www.bilibili.com/">哔哩哔哩<small>bilibili.com</small></a>
+  </nav>
+  <ul>
+    <li>需要登录的网站，请<strong>先在这里自己登录</strong>；登录状态只属于这个窗口，和你平时用的浏览器分开。</li>
+    <li>Agent 打开网址、点击和输入，默认先征求你的确认（可在「工具与技能」里调整）；Codex 不能逐项确认，会直接执行。它不会替你输入密码或付款。</li>
+    <li>为了安全，这里不会打开本机或内网地址，也不能下载文件。在「工具与技能 › 浏览器控制」里可以一键清除浏览数据。</li>
+  </ul>
+</main>
+</body>
+</html>

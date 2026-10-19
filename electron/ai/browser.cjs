@@ -2,13 +2,22 @@
 // screenshot). Its own session partition keeps cookies apart from the app; the user can log in to
 // sites there and watch or take over at any time. CLI agents reach it through browser-mcp.cjs (an
 // MCP stdio server they spawn), which calls back here over 127.0.0.1 with a random token.
-const { app, BrowserWindow, session } = require('electron');
+// The window is two views: a toolbar (browser-ui/bar.html: back, forward, reload, home, address bar)
+// and the page itself, which starts on browser-ui/start.html.
+const { app, BaseWindow, WebContentsView, ipcMain, session } = require('electron');
 const http = require('node:http');
 const crypto = require('node:crypto');
 const path = require('node:path');
 
 const PARTITION = 'persist:firefly-browser';
-let win = null;
+const UI = path.join(__dirname, 'browser-ui');
+const START = path.join(UI, 'start.html');
+const BAR_HEIGHT = 48;
+let win = null;   // BaseWindow
+let bar = null;   // WebContentsView: toolbar
+let page = null;  // WebContentsView: the web page agents drive
+/** What the toolbar shows besides the page state: a message (blocked address…) and the agent's current action. */
+const note = { message: '', agent: '' };
 let server = null;
 let endpoint = null; // { url, token }
 let queue = Promise.resolve();
@@ -51,33 +60,140 @@ function hardenSession() {
   return ses;
 }
 
+const alive = (view) => !!view && !view.webContents.isDestroyed();
+/** The page agents drive (null when the window is closed). */
+const pageContents = () => (alive(page) ? page.webContents : null);
+
+function layout() {
+  if (!win || win.isDestroyed()) return;
+  const { width, height } = win.getContentBounds();
+  bar.setBounds({ x: 0, y: 0, width, height: BAR_HEIGHT });
+  page.setBounds({ x: 0, y: BAR_HEIGHT, width, height: Math.max(0, height - BAR_HEIGHT) });
+}
+
+/** Push the page's state to the toolbar. The start page shows an empty address bar. */
+function sendState() {
+  if (!alive(bar)) return;
+  const wc = pageContents();
+  const url = wc ? wc.getURL() : '';
+  bar.webContents.send('ffbar:state', {
+    url: /^https?:/i.test(url) ? url : '',
+    canGoBack: !!wc && wc.navigationHistory.canGoBack(),
+    canGoForward: !!wc && wc.navigationHistory.canGoForward(),
+    loading: !!wc && wc.isLoading(),
+    message: note.message,
+    agent: note.agent,
+  });
+}
+
+function setNote(key, text) {
+  note[key] = text;
+  sendState();
+}
+
+/** Address-bar text → URL: a web address as typed (https:// added), anything else becomes a search. */
+function toUrl(text) {
+  const t = String(text || '').trim();
+  if (/^https?:\/\//i.test(t)) return t;
+  if (!/\s/.test(t) && /^[\w-]+(\.[\w-]+)+(:\d+)?([/?#]\S*)?$/.test(t)) return `https://${t}`;
+  if (/^localhost(:\d+)?([/?#]|$)/i.test(t)) return `http://${t}`;
+  return `https://cn.bing.com/search?q=${encodeURIComponent(t)}`;
+}
+
+function go(url) {
+  const wc = pageContents();
+  if (!wc) return;
+  if (blockedUrl(url)) { setNote('message', PRIVATE_NOTE); return; }
+  setNote('message', '');
+  wc.loadURL(url).catch((e) => { if (!/ERR_ABORTED/.test(String(e.message))) setNote('message', `打不开这个网址：${e.message}`); });
+}
+
+function goHome() {
+  const wc = pageContents();
+  if (!wc) return;
+  setNote('message', '');
+  wc.loadFile(START).catch(() => {});
+}
+
+// Toolbar commands. Only the toolbar of the current window may send them.
+ipcMain.on('ffbar', (e, cmd, arg) => {
+  if (!alive(bar) || e.sender !== bar.webContents) return;
+  const wc = pageContents();
+  if (!wc) return;
+  if (cmd === 'navigate') go(toUrl(arg));
+  else if (cmd === 'back' && wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
+  else if (cmd === 'forward' && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
+  else if (cmd === 'reload') { setNote('message', ''); wc.reload(); }
+  else if (cmd === 'home') goHome();
+  else if (cmd === 'refresh') sendState();
+  else if (cmd === 'focus-page') wc.focus();
+});
+
 function ensureWindow(show = true) {
   if (win && !win.isDestroyed()) {
     if (show && !win.isVisible()) win.showInactive();
     return win;
   }
   hardenSession();
-  win = new BrowserWindow({
+  win = new BaseWindow({
     width: 1280,
-    height: 860,
+    height: 900,
+    minWidth: 640,
+    minHeight: 420,
     show: false,
     title: '萤火浏览器',
-    backgroundColor: '#ffffff',
-    autoHideMenuBar: true,
+    backgroundColor: '#080d18',
     icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
+  });
+  win.removeMenu();
+  bar = new WebContentsView({
+    webPreferences: { preload: path.join(UI, 'bar-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false },
+  });
+  page = new WebContentsView({
     webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, backgroundThrottling: false },
   });
-  win.setMenuBarVisibility(false);
-  const wc = win.webContents;
+  bar.setBackgroundColor('#0b1221');
+  page.setBackgroundColor('#ffffff');
+  win.contentView.addChildView(page);
+  win.contentView.addChildView(bar);
+  layout();
+  win.on('resize', layout);
+  // The toolbar is our own page: it never navigates anywhere and opens nothing.
+  bar.webContents.on('will-navigate', (e) => e.preventDefault());
+  bar.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  bar.webContents.on('did-finish-load', sendState);
+  bar.webContents.loadFile(path.join(UI, 'bar.html'));
+
+  const wc = page.webContents;
   // Popups open in the same window; only web pages, never file:// or other schemes.
-  wc.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) wc.loadURL(url); return { action: 'deny' }; });
+  wc.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) go(url); return { action: 'deny' }; });
   wc.on('will-navigate', (e, url) => { if (!/^(https?:|about:blank)/i.test(url) || blockedUrl(url)) e.preventDefault(); });
   wc.on('will-redirect', (e, url) => { if (!/^https?:/i.test(url) || blockedUrl(url)) e.preventDefault(); });
   // alert()/confirm() would block the page (and every queued action) until someone clicks.
   wc.on('dom-ready', () => { wc.executeJavaScript('window.alert = () => {}; window.confirm = () => true; window.prompt = () => null;', true).catch(() => {}); });
-  wc.on('page-title-updated', (e, t) => { e.preventDefault(); if (win) win.setTitle(`${t} — 萤火浏览器`); });
-  win.on('closed', () => { win = null; });
-  win.loadURL('about:blank');
+  wc.on('page-title-updated', (e, t) => { e.preventDefault(); if (win && !win.isDestroyed()) win.setTitle(t ? `${t} — 萤火浏览器` : '萤火浏览器'); });
+  for (const ev of ['did-start-loading', 'did-stop-loading', 'did-navigate', 'did-navigate-in-page']) wc.on(ev, sendState);
+  wc.on('did-navigate', () => setNote('message', ''));
+  wc.on('did-fail-load', (_e, code, desc, url, isMain) => {
+    if (!isMain || code === -3) return; // -3: aborted (a newer navigation took over)
+    setNote('message', /BLOCKED_BY_CLIENT/.test(desc) || blockedUrl(url) ? PRIVATE_NOTE : `打不开：${desc}`);
+  });
+  // Closing the window ends its pages too: nothing keeps playing or running in the background.
+  const views = [bar.webContents, page.webContents];
+  win.on('closed', () => {
+    win = null; bar = null; page = null;
+    for (const c of views) { try { if (!c.isDestroyed()) c.close(); } catch { /* already gone */ } }
+  });
+  // Ctrl+L / F6 / Alt+D in the page jump to the address bar, as in any browser.
+  wc.on('before-input-event', (e, input) => {
+    if (input.type !== 'keyDown') return;
+    const k = String(input.key).toLowerCase();
+    if ((input.control && k === 'l') || k === 'f6' || (input.alt && k === 'd')) {
+      e.preventDefault();
+      if (alive(bar)) { bar.webContents.focus(); bar.webContents.send('ffbar:focus-url'); }
+    }
+  });
+  wc.loadFile(START).catch(() => {});
   if (show) win.showInactive();
   return win;
 }
@@ -192,8 +308,9 @@ const text = (t) => ({ content: [{ type: 'text', text: String(t) }] });
 const fail = (t) => ({ content: [{ type: 'text', text: String(t) }], isError: true });
 
 async function run(tool, args) {
-  const w = ensureWindow(true);
-  const wc = w.webContents;
+  ensureWindow(true);
+  const wc = pageContents();
+  if (!wc) return fail('萤火浏览器窗口已关闭。');
   const ref = args && Number.isInteger(Number(args.ref)) ? Number(args.ref) : null;
   switch (tool) {
     case 'browser_navigate': {
@@ -267,6 +384,12 @@ async function run(tool, args) {
 
 /* ───────────── the 127.0.0.1 bridge for browser-mcp.cjs ───────────── */
 
+/** What the toolbar says the agent is doing. */
+const ACTION_LABEL = {
+  browser_navigate: '打开网页', browser_snapshot: '读取页面', browser_click: '点击', browser_type: '输入',
+  browser_press: '按键', browser_scroll: '滚动', browser_back: '后退', browser_screenshot: '截图', browser_wait: '等待页面',
+};
+
 function startBridge() {
   if (endpoint) return Promise.resolve(endpoint);
   const token = crypto.randomBytes(24).toString('hex');
@@ -278,9 +401,13 @@ function startBridge() {
       req.on('end', () => {
         let msg;
         try { msg = JSON.parse(body); } catch { res.writeHead(400); res.end(); return; }
+        if (!msg || typeof msg !== 'object' || typeof msg.tool !== 'string') { res.writeHead(400); res.end(); return; }
         // One action at a time, in order — and none may hold the queue for more than a minute.
-        const job = queue.then(() => within(run(String(msg.tool), msg.args || {}), 60000, '这个浏览器动作'))
-          .catch((e) => fail(`浏览器出错：${e.message}`));
+        const tool = String(msg.tool);
+        const job = queue.then(async () => {
+          setNote('agent', ACTION_LABEL[tool] || '浏览');
+          try { return await within(run(tool, msg.args || {}), 60000, '这个浏览器动作'); } finally { setNote('agent', ''); }
+        }).catch((e) => fail(`浏览器出错：${e.message}`));
         queue = job.catch(() => {});
         job.then((out) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(out)); });
       });
@@ -307,7 +434,7 @@ function open() { ensureWindow(true).focus(); return true; }
 
 async function clearData() {
   await session.fromPartition(PARTITION).clearStorageData();
-  if (win && !win.isDestroyed()) win.loadURL('about:blank');
+  goHome();
   return true;
 }
 
@@ -321,4 +448,4 @@ app.on('before-quit', shutdown);
 
 const getEndpoint = () => endpoint;
 
-module.exports = { startBridge, getEndpoint, mcpLaunch, open, clearData, run, isPrivateHost };
+module.exports = { startBridge, getEndpoint, mcpLaunch, open, clearData, run, isPrivateHost, pageContents, toUrl };

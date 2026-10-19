@@ -1,20 +1,17 @@
-import { ExternalLink, FileText, FlaskConical, Heart, ImageIcon, Info, Keyboard, Palette, Play, RotateCcw, Settings, Unplug } from 'lucide-react';
+import { Database, ExternalLink, FileText, Heart, ImageIcon, Info, Keyboard, Palette, Play, RotateCcw, Settings, Trash2 } from 'lucide-react';
 import { ISSUES_URL, REPO_URL, TERMS } from '../../lib/terms';
-import { useId, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { PERSONA } from '../../lib/persona';
 import { useMedia, useReducedMotion } from '../../lib/hooks';
-import type { MotionPref, ParticleDensity, SimSpeed } from '../../lib/types';
+import type { MotionPref, ParticleDensity } from '../../lib/types';
 import { actions } from '../../state/actions';
-import { GATEWAY_ID } from '../../state/engine';
-import { gateway } from '../../state/selectors';
 import { useApp } from '../../state/store';
-import { Button, Kbd, Panel, Segmented, SimTag, Slider, Switch, cx } from '../ui';
+import { Button, Kbd, Panel, Segmented, Slider, Switch, cx } from '../ui';
 import { WALLPAPERS } from '../decor/wallpapers';
 import { DEFAULT_SETTINGS } from '../../state/seed';
+import { version as APP_VERSION } from '../../../package.json';
 import { ModePicker } from './config/ModePicker';
 import { ViewHeader } from './config/ViewHeader';
-
-const APP_VERSION = '0.2.0';
 
 const MOTION_OPTIONS: Array<{ value: MotionPref; label: string }> = [
   { value: 'system', label: '跟随系统' },
@@ -25,12 +22,6 @@ const PARTICLE_OPTIONS: Array<{ value: ParticleDensity; label: string }> = [
   { value: 'off', label: '关闭' },
   { value: 'low', label: '少量' },
   { value: 'normal', label: '标准' },
-];
-type SpeedKey = '1' | '2' | '4';
-const SPEED_OPTIONS: Array<{ value: SpeedKey; label: string }> = [
-  { value: '1', label: '1×' },
-  { value: '2', label: '2×' },
-  { value: '4', label: '4×' },
 ];
 
 /** A setting with its title and hint on the left and the control on the right (wraps when narrow). */
@@ -51,22 +42,20 @@ function SettingRow({ title, desc, descId, children }: { title: string; desc?: R
 const KEYS: Array<{ id: string; label: string; keys: ReactNode }> = [
   { id: 'console', label: '展开/收起控制台', keys: <><Kbd>Ctrl</Kbd><span aria-hidden>+</span><Kbd>`</Kbd></> },
   { id: 'nav', label: '切换导航', keys: <><Kbd>Alt</Kbd><span aria-hidden>+</span><Kbd>1</Kbd><span aria-hidden>…</span><Kbd>7</Kbd></> },
-  { id: 'send', label: '发送或创建', keys: <><Kbd>Ctrl</Kbd><span aria-hidden>+</span><Kbd>Enter</Kbd></> },
+  { id: 'send', label: '发送或创建（Shift + Enter 换行）', keys: <Kbd>Enter</Kbd> },
   { id: 'peek', label: '赏图（淡出界面看壁纸）', keys: <><Kbd>Alt</Kbd><span aria-hidden>+</span><Kbd>W</Kbd></> },
   { id: 'esc', label: '关闭对话框、状态抽屉或赏图', keys: <Kbd>Esc</Kbd> },
 ];
 
 export function SettingsView() {
   const settings = useApp((s) => s.settings);
-  const gw = useApp(gateway);
+  const desktop = useApp((s) => s.models.desktop);
   const osReduced = useMedia('(prefers-reduced-motion: reduce)');
   const reduced = useReducedMotion();
-  const gwNoteId = useId();
-  const gwDown = gw?.status === 'disconnected' || gw?.status === 'reconnecting';
 
   return (
     <div className="view settings-view">
-      <ViewHeader icon={Settings} title="设置" desc="外观、人设、运行行为与演示控制。设置保存在本机。" />
+      <ViewHeader icon={Settings} title="设置" desc="外观、人设、运行行为和数据。设置保存在本机。" />
 
       <div className="settings-body">
         <div className="settings-grid">
@@ -82,6 +71,14 @@ export function SettingsView() {
               <SettingRow title="背景粒子" desc="控制背景星点与萤火的数量。减少动态效果时只保留静止星点。">
                 <Segmented<ParticleDensity> label="背景粒子" options={PARTICLE_OPTIONS} value={settings.particles} onChange={(v) => actions.setSetting('particles', v)} />
               </SettingRow>
+              <div className="settings-item">
+                <Switch
+                  label="主题光标"
+                  description="流萤模式是带一只小萤火虫的银白箭头，可点击的地方变成薄荷色；萨姆模式是装甲箭头配萤火绿能量核心。关掉恢复系统光标。"
+                  checked={settings.themeCursor}
+                  onChange={(v) => actions.setSetting('themeCursor', v)}
+                />
+              </div>
               <SettingRow title="开机动画" desc="仿崩铁版本开屏：先播一段流萤 PV 短片（萨姆模式是萨姆），再停在标题画面「点击进入」。短片可按任意键跳过。">
                 <div className="settings-boot">
                   <Button size="sm" variant="ghost" icon={Play} onClick={() => actions.playBoot()}>预览</Button>
@@ -127,6 +124,16 @@ export function SettingsView() {
                   onChange={(v) => actions.setSetting('openConsoleOnError', v)}
                 />
               </div>
+              {desktop && (
+                <div className="settings-item">
+                  <Switch
+                    label="关闭窗口时缩小到系统托盘"
+                    description="点右上角的关闭，萤火会留在系统托盘里，运行中的任务继续进行；有操作等你确认或任务完成时会弹出系统通知。关掉这一项则关闭即退出。"
+                    checked={settings.closeToTray}
+                    onChange={(v) => actions.setSetting('closeToTray', v)}
+                  />
+                </div>
+              )}
             </div>
           </Panel>
 
@@ -141,36 +148,10 @@ export function SettingsView() {
             </dl>
           </Panel>
 
-          <Panel className="settings-span" label="模拟器" title="演示控制" icon={FlaskConical} energy actions={<SimTag />}>
-            <p className="settings-note"><FlaskConical size={14} aria-hidden />这些选项只影响模拟器，用于演示各种状态。</p>
+          <Panel label="存储" title="数据" icon={Database} energy>
             <div className="settings-list">
-              <SettingRow title="模拟速度" desc="加快模拟器的计时，更快看到运行结果。">
-                <Segmented<SpeedKey>
-                  label="模拟速度"
-                  options={SPEED_OPTIONS}
-                  value={String(settings.simSpeed) as SpeedKey}
-                  onChange={(v) => actions.setSetting('simSpeed', Number(v) as SimSpeed)}
-                />
-              </SettingRow>
-              <div className="settings-item">
-                <Switch
-                  label="注入失败"
-                  description="「代码重构」模板首次运行时，在「运行测试」步骤模拟失败，用来演示失败与重试"
-                  checked={settings.injectFailure}
-                  onChange={(v) => actions.setSetting('injectFailure', v)}
-                />
-              </div>
-              <SettingRow
-                title="模拟模型网关断开"
-                descId={gwNoteId}
-                desc={gwDown
-                  ? (gw?.status === 'reconnecting' ? '模型网关正在重连，恢复后才能再次模拟断开。' : '模型网关已断开，将自动重连。')
-                  : '运行中的任务会自动暂停，并在倒计时后重连，用来演示连接异常。'}
-              >
-                <Button icon={Unplug} disabled={gwDown} aria-describedby={gwNoteId} onClick={() => actions.simulateDisconnect(GATEWAY_ID)}>模拟断开</Button>
-              </SettingRow>
-              <SettingRow title="重置演示数据" desc="清空当前所有任务与运行，恢复 3 个示例任务。设置会保留。">
-                <Button variant="danger" icon={RotateCcw} onClick={() => actions.openDialog({ kind: 'reset-demo' })}>重置演示数据</Button>
+              <SettingRow title="清除所有任务记录" desc="删除全部任务、运行记录和事件时间线。模型接入、Agent、工具策略和外观设置都会保留。">
+                <Button variant="danger" icon={Trash2} onClick={() => actions.openDialog({ kind: 'clear-history' })}>清除所有任务记录</Button>
               </SettingRow>
             </div>
           </Panel>
@@ -203,8 +184,7 @@ export function SettingsView() {
               <div><dt>版本</dt><dd>{APP_VERSION}</dd></div>
               <div><dt>源代码</dt><dd><a href={REPO_URL} target="_blank" rel="noopener noreferrer">GitHub · xtdf0224-boop/firefly-harness</a>（MIT，仅限源代码）</dd></div>
               <div><dt>反馈</dt><dd><a href={ISSUES_URL} target="_blank" rel="noopener noreferrer">GitHub Issues</a></dd></div>
-              <div><dt>后端</dt><dd>模拟（<code>mockBackend</code>）</dd></div>
-              <div><dt>数据保存</dt><dd>本浏览器（<code>localStorage</code>）</dd></div>
+              <div><dt>数据保存</dt><dd>任务和设置只保存在这台电脑上；API 密钥由系统加密另存</dd></div>
             </dl>
           </Panel>
         </div>
@@ -308,20 +288,20 @@ function PersonaSettings() {
           <input className="input settings-callname" value={name} maxLength={20} aria-label="称呼" disabled={!st.persona}
             onChange={(e) => setName(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
         </SettingRow>
-        <SettingRow title="打字节奏" desc="演示模式的预设回复按阅读速度一个个字出现；真实模型的回复本来就是边想边说。">
-          <Segmented<'natural' | 'instant'> size="sm" label="打字节奏" value={st.typing} onChange={(v) => actions.setSetting('typing', v)}
-            options={[{ value: 'natural', label: '自然' }, { value: 'instant', label: '立即' }]} />
+        <SettingRow title="回复显示方式" desc="边写边显示：回复一点点出现；写完再显示：先显示「正在输入」，整段写完后一次出现。">
+          <Segmented<'natural' | 'instant'> size="sm" label="回复显示方式" value={st.typing} onChange={(v) => actions.setSetting('typing', v)}
+            options={[{ value: 'natural', label: '边写边显示' }, { value: 'instant', label: '写完再显示' }]} />
         </SettingRow>
         <div className="settings-item">
           <Switch label="按时间问候" description="欢迎页和新的闲聊里，她会按清晨、深夜等时段打招呼；很久没来时会说「你回来啦」。" checked={st.lifeGreeting} disabled={!st.persona}
             onChange={(v) => actions.setSetting('lifeGreeting', v)} />
         </div>
         <div className="settings-item">
-          <Switch label="小状态" description="空闲时名字旁显示她在做什么（在看星星、待命中……），随时段变化；接入模型时她也知道自己刚才在干嘛。" checked={st.lifeMood} disabled={!st.persona}
+          <Switch label="小状态" description="空闲时名字旁显示她在做什么（在看星星、待命中……），随时段变化；她也知道自己刚才在干嘛。" checked={st.lifeMood} disabled={!st.persona}
             onChange={(v) => actions.setSetting('lifeMood', v)} />
         </div>
         <div className="settings-item">
-          <Switch label="主动搭话" description="闲聊安静 8 分钟后，她可能会主动说一句，你不回复时最多连续两次。接入模型时每次搭话会调用一次模型。" checked={st.lifeNudge}
+          <Switch label="主动搭话" description="闲聊安静 8 分钟后，她可能会主动说一句，你不回复时最多连续两次。每次搭话会调用一次模型。" checked={st.lifeNudge}
             onChange={(v) => actions.setSetting('lifeNudge', v)} />
         </div>
       </div>

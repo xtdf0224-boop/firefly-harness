@@ -1,13 +1,13 @@
 /* 产物: list on the left, preview on the right (stacked when narrow). Reports render as a
-   document, files and diffs as code. Download saves the (simulated) text as a local file. */
+   document, files and diffs as code. Download saves the text as a local file. */
 import { Download, FileCode, FileDiff, FileText, Package, type LucideIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { bytes, relative } from '../../lib/format';
 import { useNow } from '../../lib/hooks';
-import type { Artifact, DataSource } from '../../lib/types';
+import type { Artifact } from '../../lib/types';
 import { actions } from '../../state/actions';
 import { shallow, useApp } from '../../state/store';
-import { Button, CodeBlock, CopyButton, EmptyState, SimTag, cx } from '../ui';
+import { Button, CodeBlock, CopyButton, EmptyState, cx } from '../ui';
 import { Markdown } from './Markdown';
 
 const NO_ARTIFACTS: Artifact[] = [];
@@ -35,7 +35,7 @@ function download(a: Artifact) {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
-  actions.toast({ tone: 'info', title: '已开始下载', body: `${a.name}（模拟产物，仅用于演示）` });
+  actions.toast({ tone: 'info', title: '已开始下载', body: a.name });
 }
 
 const isMarkdown = (a: Artifact) => a.kind === 'report' && (!a.language || /^(md|markdown)$/i.test(a.language));
@@ -43,7 +43,7 @@ const isMarkdown = (a: Artifact) => a.kind === 'report' && (!a.language || /^(md
 export function ArtifactsView({ runId }: { runId?: string }) {
   const run = useApp((s) => {
     const r = runId ? s.runs[runId] : undefined;
-    return r ? { artifacts: r.artifacts, plan: r.plan, source: r.source } : undefined;
+    return r ? { artifacts: r.artifacts, plan: r.plan } : undefined;
   }, shallow);
   const [pickedId, setPickedId] = useState<string>();
   const now = useNow(30_000);
@@ -56,7 +56,6 @@ export function ArtifactsView({ runId }: { runId?: string }) {
   }
 
   const selected = artifacts.find((a) => a.id === pickedId) ?? artifacts[0];
-  const source: DataSource = selected.simulated ? run.source : 'live';
   const markdown = isMarkdown(selected);
 
   return (
@@ -65,7 +64,6 @@ export function ArtifactsView({ runId }: { runId?: string }) {
         <section className="ws-arts__list" aria-label="产物列表">
           <div className="ws-arts__listbar">
             <span className="label">共 {artifacts.length} 个产物</span>
-            <SimTag source={run.source} compact />
           </div>
           <ul role="list">
             {artifacts.map((a) => {
@@ -94,7 +92,6 @@ export function ArtifactsView({ runId }: { runId?: string }) {
               <p>{KIND[selected.kind].label} · {bytes(selected.content)}</p>
             </div>
             <div className="ws-arts__tools">
-              <SimTag source={source} />
               {markdown && <CopyButton text={selected.content} label="复制 Markdown" />}
               <Button size="sm" icon={Download} onClick={() => download(selected)}>下载</Button>
             </div>

@@ -130,13 +130,14 @@
 }
 :root[data-wallpaper="on"] .view__desc { color: var(--text-2); }
 
-/* Small tags (status chips, badges, 模拟 tags, message kinds, step numbers) are read at 11–12px on a
+/* Small tags (status chips, badges, model tags, message kinds, step numbers) are read at 11–12px on a
    faint tint: give them a dark base under the tint so a bright patch of art never shows through. */
 :root[data-wallpaper="on"] :is(.chip, .badge, .ws-kind, .tool-call__tool, .ws-plan__item[data-status="failed"] .ws-plan__step) {
   background-image: linear-gradient(var(--c-soft), var(--c-soft));
   background-color: rgb(6 10 19 / 0.86);
 }
-:root[data-wallpaper="on"] :is(.sim-tag, .kbd:not(:is(.btn--primary, .btn--warning, .btn--success) .kbd)) { background-color: rgb(6 10 19 / 0.86); }
+:root[data-wallpaper="on"] .kbd:not(:is(.btn--primary, .btn--warning, .btn--success) .kbd) { background-color: rgb(6 10 19 / 0.86); }
+:root[data-wallpaper="on"] .engine-tag { background-image: linear-gradient(var(--mint-soft), var(--mint-soft)); background-color: rgb(6 10 19 / 0.86); }
 :root[data-wallpaper="on"] .settings-mode { background: rgb(6 10 19 / 0.82); }
 /* Cards outside panels behave like panels: what shows through them is dimmed, not just blurred. */
 :root[data-wallpaper="on"] :is(.new-task-recent__card, .history-tile) {
@@ -146,8 +147,7 @@
 /* Text halo over the art: only the pixels right around each glyph darken, so panels can stay clear. */
 :root[data-wallpaper="on"] .app { text-shadow: var(--text-halo); }
 /* …except where the backing is already solid, or the text sits on a bright fill. */
-:root[data-wallpaper="on"] :is(pre, code, input, textarea, select, .kbd, .btn--primary, .btn--warning, .btn--success,
-  .segmented__opt.is-selected, .new-task-hero__title, .task-list-filter.is-active, .history-filter.is-on) { text-shadow: none; }
+:root[data-wallpaper="on"] :is(pre, code, input, textarea, select, .kbd, .btn--primary, .btn--warning, .btn--success, .segmented__opt.is-selected, .task-list-filter.is-active, .history-filter.is-on) { text-shadow: none; }
 /* Two spots that sit on the art with the least backing: page headers and tool-name pills use the
    second grey instead of the faintest one. */
 :root[data-wallpaper="on"] .view__header { --text-3: var(--text-2); }

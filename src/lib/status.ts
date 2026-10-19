@@ -1,11 +1,11 @@
 /* One table per status family: Chinese label, tone (colour) and icon. Every status in the UI is
    rendered with icon + text, so colour is never the only signal. */
 import {
-  Ban, CheckCircle2, Circle, CircleDot, CircleSlash, Clock3, Hand, Loader, PauseCircle, Plug, PlugZap,
-  RefreshCw, ShieldAlert, SkipForward, Unplug, XOctagon, type LucideIcon,
+  Ban, CheckCircle2, Circle, CircleDot, CircleSlash, Clock3, Hand, Loader, PauseCircle, ShieldAlert, SkipForward,
+  XOctagon, type LucideIcon,
 } from 'lucide-react';
 import type {
-  AgentActivity, ApprovalStatus, ConnectionStatus, Risk, RunStatus, StepStatus, Tone, ToolCallStatus, ToolPermission,
+  AgentActivity, ApprovalStatus, Risk, RunStatus, StepStatus, Tone, ToolCallStatus, ToolPermission,
 } from './types';
 
 export interface StatusMeta {
@@ -14,7 +14,7 @@ export interface StatusMeta {
   icon: LucideIcon;
   /** Breathing glow while active. */
   live?: boolean;
-  /** The icon rotates while live (loader / reconnect); static under reduced motion. */
+  /** The icon rotates while live (loader); static under reduced motion. */
   spin?: boolean;
 }
 
@@ -60,14 +60,6 @@ export const AGENT_ACTIVITY: Record<AgentActivity, StatusMeta> = {
   tool:     { label: '调用工具', tone: 'running', icon: Loader, live: true, spin: true },
   waiting:  { label: '等待确认', tone: 'warning', icon: Hand },
   paused:   { label: '已暂停',   tone: 'paused',  icon: PauseCircle },
-  offline:  { label: '离线',     tone: 'danger',  icon: Unplug },
-};
-
-export const CONNECTION_STATUS: Record<ConnectionStatus, StatusMeta> = {
-  connected:    { label: '已连接',   tone: 'success', icon: Plug },
-  degraded:     { label: '不稳定',   tone: 'warning', icon: PlugZap },
-  disconnected: { label: '已断开',   tone: 'danger',  icon: Unplug },
-  reconnecting: { label: '重连中',   tone: 'info',    icon: RefreshCw, live: true, spin: true },
 };
 
 export const RISK: Record<Risk, { label: string; tone: Tone }> = {

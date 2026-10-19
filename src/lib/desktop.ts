@@ -53,6 +53,9 @@ export interface StartSpec {
   browser?: boolean;
 }
 
+/** What the tray menu or a notification asks the page to do. */
+export type DesktopCommand = { type: 'new' } | { type: 'close-to-tray'; value: boolean } | { type: 'approvals' } | { type: 'open-task'; taskId: string };
+
 export interface DesktopBridge {
   version: number;
   info(): Promise<{ encryption: boolean; keys: Partial<Record<ProviderId, string>>; workspaceRoot: string; platform: string }>;
@@ -70,6 +73,12 @@ export interface DesktopBridge {
   answer(id: string, requestId: string, decision: 'allow' | 'deny', input?: Record<string, unknown>): Promise<boolean>;
   stop(id: string, how: 'interrupt' | 'kill'): Promise<boolean>;
   onEvent(fn: (ev: StreamEvent) => void): () => void;
+  /** The window shell: tray preference, system notifications, commands from the tray menu. */
+  app?: {
+    setPrefs(prefs: { closeToTray: boolean }): void;
+    notify(n: { title: string; body?: string; command?: DesktopCommand }): void;
+    onCommand(fn: (cmd: DesktopCommand) => void): () => void;
+  };
   browser?: { open(): Promise<boolean>; clear(): Promise<boolean> };
   skills?: {
     list(): Promise<{ root: string; skills: import('./types').SkillInfo[]; error?: string }>;

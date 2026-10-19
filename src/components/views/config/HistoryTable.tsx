@@ -3,7 +3,7 @@ import { clock, shortDateTime, tokens } from '../../../lib/format';
 import { RUN_STATUS } from '../../../lib/status';
 import { actions } from '../../../state/actions';
 import { shallow } from '../../../state/store';
-import { Badge, SimTag, StatusChip } from '../../ui';
+import { Badge, StatusChip } from '../../ui';
 import type { HistoryRow } from './historyData';
 
 const HistoryTableRow = memo(function HistoryTableRow({ row }: { row: HistoryRow }) {
@@ -34,7 +34,12 @@ const HistoryTableRow = memo(function HistoryTableRow({ row }: { row: HistoryRow
       <td className="is-num">{row.stepsDone}/{row.stepsTotal}</td>
       <td className="is-num">{tokens(row.inputTokens + row.outputTokens)}</td>
       <td className="is-num">{row.artifacts}</td>
-      <td><SimTag source={row.source} /></td>
+      <td>
+        <span className="history-model">
+          <span className="history-model__name" title={row.model || undefined}>{row.model || '—'}</span>
+          {row.agentModelCount > 0 && <Badge tone="info" title={`部分步骤由 Agent 自己的模型完成：${row.agentModels}`}>+{row.agentModelCount}</Badge>}
+        </span>
+      </td>
     </tr>
   );
 }, (a, b) => shallow(a.row, b.row));
@@ -55,7 +60,7 @@ export function HistoryTable({ rows }: { rows: HistoryRow[] }) {
             <th scope="col" className="is-num">步骤</th>
             <th scope="col" className="is-num">Token</th>
             <th scope="col" className="is-num">产物</th>
-            <th scope="col">来源</th>
+            <th scope="col">模型</th>
           </tr>
         </thead>
         <tbody>

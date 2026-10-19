@@ -1,12 +1,12 @@
 /* Shared primitives. Every region builds from these so 流萤 / 萨姆 modes and status semantics stay
    consistent. Styles live in styles/components.css. */
-import { Check, Copy, Cpu, FlaskConical, X, type LucideIcon } from 'lucide-react';
+import { Check, Copy, Cpu, X, type LucideIcon } from 'lucide-react';
 import {
   useCallback, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type KeyboardEvent, type ReactNode,
 } from 'react';
 import { focusMainHeading } from '../../lib/focus';
 import type { StatusMeta } from '../../lib/status';
-import type { Agent, AgentActivity, DataSource, Tone } from '../../lib/types';
+import type { Agent, AgentActivity, Tone } from '../../lib/types';
 import { AGENT_ACTIVITY } from '../../lib/status';
 import { actions } from '../../state/actions';
 
@@ -142,27 +142,10 @@ export function ToneDot({ tone, live, label }: { tone: Tone; live?: boolean; lab
   return <span className={cx('tone-dot', `tone-dot--${tone}`, live && 'tone-dot--live')} role="img" aria-label={label} title={label} />;
 }
 
-/** Marks simulated / sample data. Every mock surface carries one.
- *  The word is always visible (a tooltip does not reach touch or keyboard users): `compact` only
- *  shortens 示例数据 to 示例. */
-export function SimTag({ source = 'simulated', compact, className }: { source?: DataSource; compact?: boolean; className?: string }) {
-  if (source === 'live') return null;
-  const text = source === 'sample' ? (compact ? '示例' : '示例数据') : '模拟';
-  const tip = source === 'sample'
-    ? '示例数据：由本地模拟器预先生成，用于展示界面，并非真实执行记录。'
-    : '模拟：由浏览器内的模拟器生成，没有调用真实模型、工具或命令。';
-  return (
-    <span className={cx('sim-tag', source === 'sample' && 'sim-tag--sample', compact && 'sim-tag--compact', className)} title={tip}>
-      <FlaskConical size={11} aria-hidden />
-      <span>{text}</span>
-    </span>
-  );
-}
-
-/** Marks real-model data: which model runs this task. */
+/** Which model runs this task / run. */
 export function EngineTag({ label, compact, className }: { label: string; compact?: boolean; className?: string }) {
   return (
-    <span className={cx('engine-tag', compact && 'engine-tag--compact', className)} title={`真实模型：${label}`}>
+    <span className={cx('engine-tag', compact && 'engine-tag--compact', className)} title={`使用的模型：${label}`}>
       <Cpu size={11} aria-hidden />
       <span className="truncate">{compact ? label.split(' · ')[0] : label}</span>
     </span>
@@ -335,7 +318,7 @@ export function CopyButton({ text, label = '复制' }: { text: string; label?: s
       setDone(true);
       window.setTimeout(() => setDone(false), 1600);
     } catch {
-      actions.toast({ tone: 'warning', title: '复制失败', body: '浏览器没有允许访问剪贴板。' });
+      actions.toast({ tone: 'warning', title: '复制失败', body: '没有权限访问剪贴板。' });
     }
   }, [text]);
   return (
@@ -347,8 +330,8 @@ export function CopyButton({ text, label = '复制' }: { text: string; label?: s
 }
 
 /** Monospace block with a header (language / caption), copy button and diff colouring. */
-export function CodeBlock({ code, language, caption, maxHeight = 320, wrap, className, tag }: {
-  code: string; language?: string; caption?: ReactNode; maxHeight?: number | 'none'; wrap?: boolean; className?: string; tag?: ReactNode;
+export function CodeBlock({ code, language, caption, maxHeight = 320, wrap, className }: {
+  code: string; language?: string; caption?: ReactNode; maxHeight?: number | 'none'; wrap?: boolean; className?: string;
 }) {
   const isDiff = language === 'diff';
   const lines = code.split('\n');
@@ -356,7 +339,7 @@ export function CodeBlock({ code, language, caption, maxHeight = 320, wrap, clas
     <figure className={cx('code', wrap && 'code--wrap', className)}>
       <figcaption className="code__bar">
         <span className="code__lang">{caption ?? language ?? 'text'}</span>
-        <span className="code__tools">{tag}<CopyButton text={code} /></span>
+        <span className="code__tools"><CopyButton text={code} /></span>
       </figcaption>
       <pre className="code__pre" style={{ maxHeight: maxHeight === 'none' ? undefined : maxHeight }} tabIndex={0}>
         <code>

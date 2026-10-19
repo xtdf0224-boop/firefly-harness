@@ -1,18 +1,29 @@
-/* 终端输出 tab: the simulated terminal of a run. Nothing here is a real shell. */
+/* 终端输出 tab: what the run's command-line agent ran and printed, plus the workbench's own notes. */
 import { Check, SquareTerminal } from 'lucide-react';
 import { memo, useMemo, type ReactNode } from 'react';
 import { timeOfDay } from '../../lib/format';
-import type { DataSource, TerminalLine } from '../../lib/types';
+import type { TerminalLine } from '../../lib/types';
 import { useApp } from '../../state/store';
-import { CopyButton, EmptyState, SimTag } from '../ui';
+import { CopyButton, EmptyState } from '../ui';
 import { useFollowScroll, useRemembered } from './consoleHooks';
 
 const EMPTY_LINES: TerminalLine[] = [];
 
+/** How the run's models work: a command-line agent runs commands, an API call only talks. */
+const NOTE = {
+  cli: '命令行 Agent 执行的命令与输出',
+  api: '这次运行通过 API 进行，不会执行命令；这里只显示系统消息',
+};
+
 export function TerminalTab({ runId }: { runId?: string }) {
   const lines = useApp((s) => (runId ? s.runs[runId]?.terminal : undefined)) ?? EMPTY_LINES;
   const running = useApp((s) => (runId ? s.runs[runId]?.status === 'running' : false));
-  const source = useApp((s): DataSource => (runId ? s.runs[runId]?.source : undefined) ?? 'simulated');
+  const way = useApp((s): 'cli' | 'api' | undefined => {
+    const run = runId ? s.runs[runId] : undefined;
+    if (!run) return undefined;
+    const engines = [s.tasks[run.taskId]?.engine, ...Object.values(run.agentEngines ?? {})];
+    return engines.some((e) => e?.auth === 'cli') ? 'cli' : engines.some((e) => e?.auth === 'api') ? 'api' : undefined;
+  });
 
   const [showTime, setShowTime] = useRemembered('term.time', false);
   const scroll = useFollowScroll<HTMLDivElement>(lines.length);
@@ -21,8 +32,7 @@ export function TerminalTab({ runId }: { runId?: string }) {
   return (
     <>
       <div className="console__toolbar">
-        <SimTag source={source} />
-        <span className="console__note">模拟终端：没有执行任何真实命令</span>
+        {way && <span className="console__note">{NOTE[way]}</span>}
         <div className="console__toolbar-end">
           <Toggle pressed={showTime} onToggle={() => setShowTime(!showTime)}>显示时间</Toggle>
           <Toggle pressed={scroll.following} onToggle={() => scroll.setFollowing(!scroll.following)}>自动跟随</Toggle>
@@ -31,7 +41,7 @@ export function TerminalTab({ runId }: { runId?: string }) {
       </div>
 
       <div className="console__pane">
-        <div ref={scroll.ref} className="term" role="log" aria-live="off" aria-label="终端输出（模拟）" tabIndex={0}
+        <div ref={scroll.ref} className="term" role="log" aria-live="off" aria-label="终端输出" tabIndex={0}
           onScroll={scroll.onScroll} onClickCapture={scroll.onClickCapture}>
           {lines.length > 0 ? (
             <>
@@ -42,7 +52,7 @@ export function TerminalTab({ runId }: { runId?: string }) {
             </>
           ) : (
             <EmptyState compact icon={SquareTerminal} title={runId ? '还没有终端输出' : '还没有运行'}
-              body={runId ? undefined : '开始一个任务后，模拟终端的输出会显示在这里。'} />
+              body={runId ? undefined : '开始一个任务后，命令输出会显示在这里。'} />
           )}
         </div>
       </div>

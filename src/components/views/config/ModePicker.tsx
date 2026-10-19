@@ -13,7 +13,7 @@ const MODES: Array<{ id: VisualMode; name: string; desc: string }> = [
 const SEGMENTS = 16;
 const LIT = 10;
 
-/** A tiny mock of a panel, a status chip and a meter. Styled per data-preview-mode, so each card shows
+/** A miniature of a panel, a status chip and a meter. Styled per data-preview-mode, so each card shows
  *  its own look no matter which mode the app is currently in. Decorative: the card text names it. */
 function ModePreview() {
   return (

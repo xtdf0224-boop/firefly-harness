@@ -182,56 +182,13 @@ export function rolePrompt(agent: AgentId, callName: string) {
   return `${role[agent]}${common}`;
 }
 
-/* ───────────── 演示模式的预设台词 ───────────── */
-
-const DEMO_CHAT: Record<VisualMode, { hello: string[]; thanks: string[]; generic: string[] }> = {
-  firefly: {
-    hello: ['{greet} ……不过现在还是演示模式，我只会说几句预设的话。去「模型接入」接上一个模型，我们就能好好聊天了。'],
-    thanks: ['不用谢呀。……其实这次我什么都没做，演示模式下的我只会这几句。'],
-    generic: [
-      '嗯，我在听。不过现在是演示模式，我没办法真正理解你说的话……接入一个模型之后，我会认真回答你的。',
-      '谢谢你愿意和我说这些。演示模式下我只能给出预设的回复——等接上真实模型，再好好聊，好吗？',
-      '这句话我想认真回答……可现在的我只是演示用的。去「模型接入」那里接一个模型吧，我等你。',
-    ],
-  },
-  sam: {
-    hello: ['{greet} 当前为演示模式：仅返回预设应答。'],
-    thanks: ['收到。注意：演示模式，本次未执行任何操作。'],
-    generic: [
-      '信号已接收。演示模式：无法解析内容。前往「模型接入」完成配置后重新下达。',
-      '收到。当前为演示模式，仅能返回预设应答。接入模型后，萨姆将正式受理。',
-      '报告：演示模式下不具备理解能力。处置：在「模型接入」中连接一个模型。',
-    ],
-  },
-};
-
-/** Canned chat reply for 演示模式 — honest about not understanding. */
-export function demoChatReply(mode: VisualMode, name: string, text: string, d = new Date()) {
-  const set = DEMO_CHAT[mode];
-  const t = text.trim();
-  let line: string;
-  if (/^(你好|您好|嗨|hi|hello|早|早上好|晚上好|下午好|中午好|在吗|哈喽)/i.test(t)) line = pick(set.hello, 0, d).replace('{greet}', greeting(mode, name, 0, d));
-  else if (/谢谢|感谢|多谢|thx|thanks/i.test(t)) line = pick(set.thanks, 0, d);
-  else line = set.generic[(t.length + d.getMinutes()) % set.generic.length];
-  return fill(line, name);
-}
-
-const NUDGES: Record<VisualMode, string[]> = {
-  firefly: ['……你还在吗？不着急，我就在这里。', '要不要休息一下？喝口水也好。', '刚才好像看到窗外有萤火虫……啊，抱歉，自言自语了。'],
-  sam: ['待命中。随时可以下达新指令。', '状态报告：一切正常。等待指令。', '静默超时。萨姆仍在线。'],
-};
-
-export function demoNudge(mode: VisualMode, seed: number) {
-  return NUDGES[mode][seed % NUDGES[mode].length];
-}
-
 /** Instruction for the opening line of a new chat nobody has spoken in yet. */
 export const GREET_PROMPT = '（系统提示：对方刚打开和你的聊天窗口，还没有说话。用你的口吻自然地打个招呼，不超过 40 字，可以带上此刻的时间感。）';
 
 /** Instruction for a live proactive line in a quiet chat. */
 export const NUDGE_PROMPT = '（系统提示：对方有一会儿没说话了。用你的口吻自然地主动说一句话，不超过 40 字：可以关心对方、聊聊此刻的时间，或接着刚才的话题。不要连续追问。）';
 
-/** Short persona lines around run events (演示模式 and real runs alike). */
+/** Short persona lines around run events. */
 export function eventLine(mode: VisualMode, event: 'plan' | 'done' | 'failed' | 'rejected' | 'cancelled', name: string) {
   const L: Record<VisualMode, Record<typeof event, string>> = {
     firefly: {

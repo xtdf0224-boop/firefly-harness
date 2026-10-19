@@ -1,6 +1,5 @@
-/* Domain model of the harness. Everything the UI shows comes from these shapes, whether a real
-   backend or the bundled simulator produced it. `simulated` / `source` fields carry the provenance
-   so the UI can label demo data honestly. */
+/* Domain model of the harness. Everything the UI shows comes from these shapes: tasks, the runs real
+   models carry out (live.ts drives them through the desktop bridge), and the settings around them. */
 
 export type ViewId = 'new' | 'tasks' | 'task' | 'agents' | 'tools' | 'models' | 'history' | 'settings';
 export type WorkspaceTab = 'conversation' | 'steps' | 'artifacts';
@@ -9,18 +8,12 @@ export type ConsoleTab = 'tools' | 'terminal' | 'errors' | 'timeline';
 export type VisualMode = 'firefly' | 'sam';
 export type MotionPref = 'system' | 'reduced' | 'full';
 export type ParticleDensity = 'off' | 'low' | 'normal';
-export type SimSpeed = 1 | 2 | 4;
-
-/** Where a record came from. `simulated` = produced live by the in-browser simulator this session;
- *  `sample` = pre-generated example history. A real backend would use `live`. */
-export type DataSource = 'simulated' | 'sample' | 'live';
 
 export type RunStatus = 'queued' | 'running' | 'paused' | 'awaiting' | 'completed' | 'failed' | 'cancelled';
 export type StepStatus = 'pending' | 'running' | 'awaiting' | 'done' | 'failed' | 'skipped' | 'cancelled';
 export type ToolCallStatus = 'running' | 'awaiting' | 'ok' | 'error' | 'denied' | 'cancelled';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
-export type AgentActivity = 'idle' | 'thinking' | 'tool' | 'waiting' | 'paused' | 'offline';
-export type ConnectionStatus = 'connected' | 'degraded' | 'disconnected' | 'reconnecting';
+export type AgentActivity = 'idle' | 'thinking' | 'tool' | 'waiting' | 'paused';
 export type ToolPermission = 'auto' | 'confirm' | 'off';
 export type Risk = 'low' | 'medium' | 'high';
 export type Tone = 'neutral' | 'info' | 'running' | 'success' | 'warning' | 'danger' | 'paused';
@@ -35,7 +28,7 @@ export type ProviderId = 'claude' | 'gpt' | 'deepseek' | 'kimi' | 'qwen' | 'glm'
  *  Anthropic-compatible endpoint with that vendor's key. */
 export type DriverId = 'claude-code' | 'codex' | 'kimi' | 'qwen' | 'mcode' | 'dsh' | 'claude-compat';
 export type AuthMode = 'cli' | 'api';
-/** What a work task's CLI agent may do: follow 工具与连接's policies, or only read. */
+/** What a work task's CLI agent may do: follow 工具与技能's policies, or only read. */
 export type WorkAccess = 'policy' | 'read';
 
 export interface CliStatus {
@@ -73,6 +66,9 @@ export interface ProviderConfig {
   cliPath: string;
   /** Codex only: its Windows sandbox fails on some machines; 'danger-full-access' runs without it. */
   codexSandbox?: 'workspace-write' | 'danger-full-access';
+  /** Default 推理强度 for new tasks using the API way / the CLI way; undefined = the model's own default. */
+  effort?: import('./effort').Effort;
+  cliEffort?: import('./effort').Effort;
   /** '••••abcd' when a key is saved. */
   keyHint?: string;
   cli?: CliStatus;
@@ -87,11 +83,11 @@ export interface ModelState {
   desktop: boolean;
   encryption: boolean;
   workspaceRoot?: string;
-  /** 'demo' or a vendor: preselected for new tasks. */
-  defaultEngine: 'demo' | ProviderId;
+  /** Vendor preselected for new tasks ('' = the first one that is ready). */
+  defaultEngine: ProviderId | '';
 }
 
-/** How a task runs. Undefined = the bundled simulator (演示模式). */
+/** How a task (or one agent's steps) runs: which vendor, which way, which model. */
 export interface TaskEngine {
   kind: 'live';
   provider: ProviderId;
@@ -127,12 +123,23 @@ export interface SkillInfo {
   error?: string;
 }
 
+/** An agent's own model, set on the Agent page: an engine choice (`claude:cli`…), model and effort. */
+export interface AgentEngine {
+  /** EngineChoice key: `${provider}:${auth}`. */
+  key: string;
+  /** '' = that way's default model. */
+  model: string;
+  effort?: import('./effort').Effort;
+}
+
 export interface Agent {
   id: AgentId;
   name: string;          // functional name, e.g. 编排 Agent
   role: string;          // one line: what it is for
   description: string;
-  model: string;         // configured model id (in demo mode nothing is called)
+  /** Its own model for the steps it is given; undefined = the task's model. The 编排 Agent always uses the task's. */
+  engine?: AgentEngine;
+  /** Tools it may use when its steps run on a command-line agent. */
   tools: ToolId[];
   enabled: boolean;
   /** Short glyph text for the avatar (1–2 chars). */
@@ -150,44 +157,27 @@ export interface ToolDef {
   risk: Risk;
 }
 
-export interface Connection {
-  id: string;
-  name: string;
-  kind: 'model' | 'mcp' | 'runtime';
-  endpoint: string;
-  status: ConnectionStatus;
-  latencyMs?: number;
-  lastChangeAt: number;
-  /** Next automatic reconnect attempt (epoch ms) while disconnected. */
-  retryAt?: number;
-  attempts: number;
-  detail?: string;
-  simulated: boolean;
-}
-
 export interface Task {
   id: string;
   title: string;
   goal: string;
   createdAt: number;
   updatedAt: number;
-  scenarioId: ScenarioId;
   agentIds: AgentId[];
   /** Oldest first. The last entry is the current run. */
   runIds: string[];
   messages: Message[];
-  source: DataSource;
   /** 闲聊 or 工作. Older saves have no kind: they are work tasks. */
   kind?: TaskKind;
-  /** Real model; undefined = 演示模式. */
+  /** The model the task runs on (undefined only if it was never set up; the UI asks to pick one). */
   engine?: TaskEngine;
   /** CLI session id, so later runs and chat turns continue the same conversation. */
   session?: string;
+  /** CLI sessions of agents that run on their own command-line model. */
+  agentSessions?: Partial<Record<AgentId, string>>;
   /** Skill folders picked for this task; undefined = every enabled skill for its kind. */
   skills?: string[];
 }
-
-export type ScenarioId = 'refactor' | 'research' | 'report' | 'general';
 
 export interface PlanStep {
   id: string;
@@ -206,15 +196,17 @@ export interface PlanStep {
   note?: string;
   /** True when a retry reused this step's result from the previous attempt. */
   carried?: boolean;
-  /** What the agent reported for this step (real runs). */
+  /** What the agent reported for this step. */
   result?: string;
+  /** The model that ran this step, when it was not the task's own (an agent with its own model). */
+  engineLabel?: string;
 }
 
 export interface ToolCallError {
   code: string;            // e.g. EXIT_1, HTTP_429, ETIMEDOUT
   message: string;         // one line, human readable
   detail?: string;         // stack / stderr excerpt (monospace)
-  recoverable: boolean;    // the agent retried on its own
+  recoverable: boolean;    // the agent carried on after it (the call failed, not the step)
 }
 
 export interface ToolCall {
@@ -231,10 +223,7 @@ export interface ToolCall {
   startedAt: number;
   endedAt?: number;
   durationMs?: number;     // active (unpaused) duration
-  /** Planned duration of the simulated call — lets the UI draw progress. */
-  expectedMs?: number;
   approvalId?: string;
-  simulated: boolean;
   /** The CLI's own tool name (PowerShell, Edit, apply_patch…) when `tool` is a mapped category. */
   toolName?: string;
 }
@@ -265,17 +254,16 @@ export interface Message {
   text: string;
   at: number;
   kind?: 'plan' | 'note' | 'summary' | 'error' | 'reply';
-  simulated: boolean;
-  /** Still being written (a real model streaming its reply). */
+  /** Still being written (the model is streaming its reply). */
   streaming?: boolean;
   /** Which voice spoke (流萤 or 萨姆), so switching modes later does not rename old messages. */
   persona?: VisualMode;
-  /** The reply came from a real model (rendered as Markdown, no 模拟 tag). */
-  live?: boolean;
   /** The model's visible reasoning for this reply (shown folded, like DeepSeek's 思考过程). */
   thinking?: string;
   /** A supplement sent during a live run that has already been handed to the agent. */
   delivered?: boolean;
+  /** While a chat reply is being written: what she is doing right now (a tool she is using). */
+  activity?: string;
 }
 
 export interface Artifact {
@@ -287,10 +275,9 @@ export interface Artifact {
   language?: string;          // ts, md, json, diff…
   content: string;
   createdAt: number;
-  simulated: boolean;
 }
 
-export type EventKind = 'run' | 'step' | 'tool' | 'approval' | 'agent' | 'connection' | 'user' | 'error';
+export type EventKind = 'run' | 'step' | 'tool' | 'approval' | 'agent' | 'user' | 'error';
 export interface RunEvent {
   id: string;
   at: number;
@@ -315,18 +302,14 @@ export interface Usage {
   cachedTokens: number;
   contextUsed: number;
   contextLimit: number;
-  /** Total tokens sampled after each beat, for the sparkline. */
+  /** Total tokens sampled after each usage report, for the sparkline. */
   series: number[];
 }
 
 export interface RunCursor {
   phase: 'planning' | 'executing' | 'done';
+  /** Plan index being worked on. */
   step: number;
-  beat: number;
-  /** Simulated ms already spent on the current beat. */
-  beatElapsed: number;
-  /** The current beat's start effects (tool call created, approval asked) have been applied. */
-  beatStarted: boolean;
 }
 
 /** What the run's active agent is doing right now — drives the status panel and step glow. */
@@ -342,7 +325,7 @@ export interface Run {
   attempt: number;          // 1-based, increments on retry
   status: RunStatus;
   /** Why the run is paused, when it is. */
-  pauseReason?: 'user' | 'disconnected' | 'reload';
+  pauseReason?: 'user' | 'reload';
   createdAt: number;
   startedAt?: number;
   endedAt?: number;
@@ -363,12 +346,14 @@ export interface Run {
   /** Which run this one retried, if any. */
   retryOf?: string;
   retryMode?: 'resume' | 'restart';
-  /** Plan index where the previous attempt failed; retry-only fix beats run there. */
-  fixStepIndex?: number;
   failure?: { stepId: string; message: string };
-  source: DataSource;
-  /** Real runs: which model ran it, e.g. 「Claude · Claude Code · claude-sonnet-5-5」. */
+  /** Which model ran it, e.g. 「Claude · Claude Code · Claude Sonnet 5.5」. */
   engineLabel?: string;
+  /** Agents that ran on their own model in this run (snapshot taken when the run started). */
+  agentEngines?: Partial<Record<AgentId, TaskEngine>>;
+  /** Which done steps each CLI session has been told about ('task' = the task's own session, or an
+   *  agent id): results produced elsewhere are handed to a session once, before its next turn. */
+  shown?: Record<string, string[]>;
 }
 
 export interface RunErrorRecord {
@@ -388,11 +373,12 @@ export interface Settings {
   mode: VisualMode;
   motion: MotionPref;
   particles: ParticleDensity;
-  simSpeed: SimSpeed;
+  /** 主题光标: the 流萤 / 萨姆 cursor set instead of the system's. */
+  themeCursor: boolean;
   confirmBeforeCancel: boolean;
   openConsoleOnError: boolean;
-  /** Demo control: the first attempt of the refactor scenario fails at the test step. */
-  injectFailure: boolean;
+  /** Desktop: the close button tucks the window into the system tray instead of quitting. */
+  closeToTray: boolean;
   /** Show the character wallpaper under the starfield (流萤 and 萨姆 each have their own). */
   wallpaper: boolean;
   /** 0–100: how clearly the wallpaper shows through the night grade. */
@@ -409,7 +395,7 @@ export interface Settings {
   persona: boolean;
   /** How she addresses you. */
   callName: string;
-  /** 'natural' reveals replies at a reading pace; 'instant' shows them at once. */
+  /** 'natural' shows a reply as it is written; 'instant' waits and shows each finished reply at once. */
   typing: 'natural' | 'instant';
   /** Time-of-day greeting on the welcome page. */
   lifeGreeting: boolean;
@@ -427,8 +413,7 @@ export type UiCommand =
   | { type: 'resume-run'; runId: string }
   | { type: 'retry-run'; runId: string; mode: 'resume' | 'restart' }
   | { type: 'show-approvals' }
-  | { type: 'navigate'; view: ViewId }
-  | { type: 'reconnect'; connectionId: string };
+  | { type: 'navigate'; view: ViewId };
 
 export interface Toast {
   id: string;
@@ -440,7 +425,7 @@ export interface Toast {
   /** ms; 0 = stays until dismissed */
   ttl: number;
   /** Toasts about the same thing share a key: a newer one replaces the older, and resolving the
-   *  thing (approval decided, run retried, connection back) removes it. */
+   *  thing (approval decided, run retried) removes it. */
   key?: string;
 }
 
@@ -454,7 +439,7 @@ export interface ConsoleState {
 
 export type Dialog =
   | { kind: 'cancel-run'; runId: string }
-  | { kind: 'reset-demo' }
+  | { kind: 'clear-history' }
   | { kind: 'delete-task'; taskId: string };
 
 export interface Celebration { runId: string; at: number }
@@ -475,7 +460,6 @@ export interface AppState {
   runs: Record<string, Run>;
   agents: Agent[];
   tools: ToolDef[];
-  connections: Connection[];
   models: ModelState;
   /** Installed skills (read from the desktop side; not saved in the page). */
   skills?: { root: string; list: SkillInfo[]; loaded: boolean };

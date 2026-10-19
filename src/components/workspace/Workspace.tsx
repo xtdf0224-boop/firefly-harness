@@ -1,13 +1,13 @@
 /* 任务工作区 (view "task"): header + goal + state callout, then the plan next to the tabbed
    conversation / steps / artifacts. Reads the selected task and run from the store; every control
-   goes through `actions`. All run data shown here is simulated and labelled as such. */
+   goes through `actions`. */
 import { ListChecks, MessageSquare, Package } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useReducedMotion } from '../../lib/hooks';
 import { actions } from '../../state/actions';
 import { currentRun, latestRun } from '../../state/selectors';
 import { shallow, useApp } from '../../state/store';
-import { SimTag, Tabs, tabPanelProps, type TabItem } from '../ui';
+import { Tabs, tabPanelProps, type TabItem } from '../ui';
 import { ArtifactsView } from './ArtifactsView';
 import { ChatWorkspace } from './ChatWorkspace';
 import { Conversation } from './Conversation';
@@ -36,7 +36,6 @@ function TaskWorkspace({ taskId }: { taskId: string }) {
   const tab = useApp((s) => s.workspaceTab);
   const messageCount = useApp((s) => s.tasks[taskId]?.messages.length ?? 0);
   const artifactCount = useApp((s) => (runId ? s.runs[runId]?.artifacts.length ?? 0 : 0));
-  const source = useApp((s) => (runId ? s.runs[runId]?.source : s.tasks[taskId]?.source));
   const reduced = useReducedMotion();
 
   const [stepTarget, setStepTarget] = useState<StepTarget | null>(null);
@@ -72,7 +71,6 @@ function TaskWorkspace({ taskId }: { taskId: string }) {
         <section className="panel ws-main" aria-label="任务内容">
           <div className="panel__header panel__header--energy ws-main__bar">
             <Tabs idBase="ws" label="任务内容" items={tabs} value={tab} onChange={actions.setWorkspaceTab} />
-            {source && source !== 'live' && <SimTag source={source} />}
           </div>
           {/* The conversation stays mounted (hidden) so the draft and scroll position survive tab switches. */}
           <div {...tabPanelProps('ws', 'conversation')} tabIndex={undefined} className="ws-main__panel" hidden={tab !== 'conversation'}>

@@ -1,81 +1,105 @@
 /* 模型 + 强度 chips, shared by the home box and the chat box.
-   模型: one menu grouped by service and way (Claude · API, GPT · Codex CLI…) listing concrete models —
-   the CLI's live list when it has one (Codex), otherwise the catalog. 强度: only the levels the chosen
-   model or tool accepts; hidden when it cannot be tuned. */
-import { Cpu, Gauge } from 'lucide-react';
+   模型: one menu grouped by service and way (Claude · API, GPT · Codex CLI…) listing concrete models by
+   their version names — the CLI's live list when it has one (Codex), otherwise the catalog. 强度: only the
+   levels the chosen model or tool accepts; hidden when it cannot be tuned. */
+import { Cpu, Gauge, Settings2 } from 'lucide-react';
+import { useMemo } from 'react';
+import { DRIVERS, PROVIDER_BY_ID, modelName } from '../../lib/providers';
 import { EFFORT_HINT, EFFORT_LABEL, type Effort } from '../../lib/effort';
-import { DRIVERS, PROVIDER_BY_ID } from '../../lib/providers';
-import type { AppState } from '../../lib/types';
-import { choiceEfforts, engineChoices, modelOptions, type EngineChoice } from '../../state/models';
+import type { DriverId, ModelState, ProviderId } from '../../lib/types';
+import { actions } from '../../state/actions';
+import { choiceEfforts, effortMenu, engineChoices, menuValue, modelMenuGroups, parseMenuValue } from '../../state/models';
 import { useApp } from '../../state/store';
-import { ChipGroupSelect, ChipSelect } from './PromptBox';
+import { MenuSelect, type MenuGroup } from '../ui/MenuSelect';
 
 export interface ModelPick {
-  /** EngineChoice key, or 'demo'. */
+  /** EngineChoice key (`claude:cli`); '' = nothing picked yet. */
   key: string;
   /** Concrete model id ('' = the tool's default). */
   model: string;
   effort?: Effort;
+  /** The CLI tool the task actually runs on (it may differ from what 模型接入 is set to now). */
+  driver?: DriverId;
 }
 
-export const groupLabel = (c: Pick<EngineChoice, 'provider' | 'auth' | 'driver'>) =>
-  `${PROVIDER_BY_ID[c.provider].name} · ${c.auth === 'api' ? 'API' : DRIVERS[c.driver ?? PROVIDER_BY_ID[c.provider].drivers[0]].label}`;
-
-/** The menu as a stable string, so the chips re-render only when it changes. */
-function menuSig(s: AppState) {
-  return engineChoices(s.models).map((c) => `${c.key}:${modelOptions(s.models, c).map((m) => m.id).join(',')}`).join('|');
+/** 「Claude Sonnet 5.5 · Claude Code」, or 「Claude Code · 默认模型」 when the tool picks the model itself. */
+function pickText(models: ModelState, pick: ModelPick) {
+  const [id, auth] = pick.key.split(':');
+  const p = PROVIDER_BY_ID[id as ProviderId];
+  if (!p) return '';
+  const way = auth === 'api' ? 'API' : DRIVERS[pick.driver ?? models.providers[p.id].driver].label;
+  if (pick.model) return `${modelName(p, pick.model)} · ${way}`;
+  return `${auth === 'api' ? p.name : way} · 默认模型`;
 }
 
-export function ModelChips({ pick, onPick, allowDemo = true }: { pick: ModelPick; onPick: (p: ModelPick) => void; allowDemo?: boolean }) {
-  useApp(menuSig);
+export function ModelChips({ pick, onPick }: { pick: ModelPick; onPick: (p: ModelPick) => void }) {
   const models = useApp((s) => s.models);
   const choices = engineChoices(models);
-  const choice = choices.find((c) => c.key === pick.key);
+  const listed = choices.find((c) => c.key === pick.key);
+  // The vendor's tool was switched on 模型接入 after this task started (DSH → Claude Code): the task still
+  // runs on its own tool, so the menu entry of the new tool is a different choice, not the current one.
+  const moved = !!(listed && pick.driver && listed.driver && pick.driver !== listed.driver);
+  const choice = moved ? undefined : listed;
   const levels = choice ? choiceEfforts(models, choice, pick.model) : [];
+  const value = moved ? `${pick.key}@${pick.driver}|${pick.model}` : menuValue(pick.key, pick.model);
+  const text = pickText(models, pick);
 
-  const groups = [
-    ...(allowDemo ? [{ label: '', options: [{ value: 'demo|', label: '演示模式' }] }] : []),
-    ...choices.map((c) => {
-      const options = modelOptions(models, c).map((m) => ({ value: `${c.key}|${m.id}`, label: m.id ? `${m.label}${m.note && m.label === m.id ? `  ·  ${m.note}` : ''}` : `默认（${m.note ?? '工具自己选'}）` }));
-      // The model in use is no longer listed (custom id changed, live list dropped it): keep showing it.
-      if (c.key === pick.key && !options.some((o) => o.value === `${c.key}|${pick.model}`)) options.unshift({ value: `${c.key}|${pick.model}`, label: `${pick.model || '默认'}（当前）` });
-      return { label: groupLabel(c), options };
-    }),
-  ];
-  // The engine in use is not ready any more (key removed, CLI signed out): show it as it is, not as 演示模式.
-  const provider = pick.key === 'demo' ? undefined : PROVIDER_BY_ID[pick.key.split(':')[0] as keyof typeof PROVIDER_BY_ID];
-  const stale = !choice && provider ? `${provider.name} · ${pick.model || '默认'}` : '';
-  if (stale) groups.push({ label: '当前（不可用）', options: [{ value: `${pick.key}|${pick.model}`, label: `${stale}（需要到「模型接入」里重新配置）` }] });
-  const value = choice || stale ? `${pick.key}|${pick.model}` : 'demo|';
-  const shown = choice ? `${groupLabel(choice)} · ${pick.model || '默认'}` : stale ? `${stale}（不可用）` : '演示模式';
-  const p = choice ? PROVIDER_BY_ID[choice.provider] : undefined;
-  const chip = stale ? `${stale}（不可用）` : !choice || !p ? '演示模式'
-    : `${p.name} · ${pick.model || (choice.auth === 'api' ? '默认' : `${DRIVERS[choice.driver ?? p.drivers[0]].label} 默认`)}`;
+  const groups = useMemo(() => {
+    const out: Array<MenuGroup> = modelMenuGroups(models);
+    // The model in use is not in the list: a custom id that was changed, a way that was signed out or
+    // removed. Keep showing it, labelled for what it is, so the chip never claims something else.
+    if (text && !out.some((g) => g.options.some((o) => o.value === value))) {
+      out.push({
+        label: '当前使用',
+        options: [{ value, label: choice ? `${text}（当前）` : moved ? `${text}（当前）` : `${text}（不可用）`, sub: pick.model || undefined, disabled: !choice }],
+      });
+    }
+    return out;
+  }, [models, value, text, choice, pick.model]);
+
+  if (!choices.length && !text) {
+    return (
+      <button type="button" className="pchip pchip--action" onClick={() => actions.navigate('models')}>
+        <Cpu size={13} aria-hidden />先接入一个模型
+      </button>
+    );
+  }
 
   const onModel = (v: string) => {
-    const [key, ...rest] = v.split('|');
-    const model = rest.join('|');
-    if (key === pick.key && model === pick.model) return;
-    const next = choices.find((c) => c.key === key);
-    if (!next && key !== 'demo') return;
-    const nextLevels = next ? choiceEfforts(models, next, model) : [];
-    onPick({ key, model, effort: pick.effort && nextLevels.includes(pick.effort) ? pick.effort : undefined });
+    const next = parseMenuValue(v);
+    if (next.key === pick.key && next.model === pick.model) return;
+    const c = choices.find((x) => x.key === next.key);
+    if (!c) return;
+    const nextLevels = choiceEfforts(models, c, next.model);
+    // Keep the level when the new model has it; a different way starts from the default set on 模型接入.
+    const keep = pick.effort && nextLevels.includes(pick.effort) ? pick.effort : undefined;
+    const fallback = next.key !== pick.key && c.effort && nextLevels.includes(c.effort) ? c.effort : undefined;
+    onPick({ key: next.key, model: next.model, effort: keep ?? fallback });
   };
+
+  const footer = (
+    <button type="button" className="model-manage" onClick={() => actions.navigate('models')}>
+      <Settings2 size={13} aria-hidden />管理模型接入
+    </button>
+  );
 
   return (
     <>
-      <ChipGroupSelect icon={Cpu} label="使用的模型" value={value} groups={groups} onChange={onModel} title={shown} display={chip} />
+      <MenuSelect
+        variant="chip" icon={Cpu} label="使用的模型" value={value} groups={groups} onChange={onModel}
+        display={text ? (choice || moved ? text : `${text}（不可用）`) : undefined} placeholder="选择模型"
+        title={text ? `使用的模型：${text}${pick.model ? `\n模型 ID：${pick.model}` : ''}` : '选择要用的模型'}
+        footer={footer} minWidth={320}
+      />
       {choice && levels.length > 0 && (
-        <ChipSelect<string> icon={Gauge} label="推理强度" value={pick.effort ?? ''}
+        <MenuSelect
+          variant="chip" icon={Gauge} label="推理强度" value={pick.effort ?? ''} options={effortMenu(levels)}
+          display={`强度 · ${pick.effort ? EFFORT_LABEL[pick.effort] : '默认'}`}
           title={pick.effort ? `推理强度：${EFFORT_LABEL[pick.effort]}${EFFORT_HINT[pick.effort] ? `（${EFFORT_HINT[pick.effort]}）` : ''}` : '推理强度：用模型自己的默认'}
           onChange={(v) => onPick({ ...pick, effort: (v || undefined) as Effort | undefined })}
-          options={[{ value: '', label: '强度 · 默认' }, ...levels.map((l) => ({ value: l, label: `强度 · ${EFFORT_LABEL[l]}` }))]} />
+          minWidth={220}
+        />
       )}
     </>
   );
-}
-
-/** The model a choice uses when nothing else is picked: what 模型接入 has configured. */
-export function defaultModel(c: EngineChoice | undefined) {
-  return c?.model ?? '';
 }

@@ -1,8 +1,7 @@
-import { Info, Plug, Wrench } from 'lucide-react';
+import { Info, Wrench } from 'lucide-react';
 import { PERMISSION } from '../../lib/status';
 import { useApp } from '../../state/store';
-import { Panel, SimTag, cx } from '../ui';
-import { ConnectionCard } from './config/ConnectionCard';
+import { Panel, cx } from '../ui';
 import { ToolRow } from './config/ToolRow';
 import { PERM_ICON, sameRecord, selectToolStats } from './config/util';
 import { BrowserPanel } from './config/BrowserPanel';
@@ -12,24 +11,23 @@ import { ViewHeader } from './config/ViewHeader';
 const POLICY_HELP = [
   { id: 'auto', text: '直接调用' },
   { id: 'confirm', text: '每次调用前出现在「待确认操作」' },
-  { id: 'off', text: '相关步骤会被跳过' },
+  { id: 'off', text: 'Agent 不能调用，它会换一种做法或说明做不到' },
 ] as const;
 
-/** Tool policies (auto / confirm / off) and the state of every connection the agents depend on. */
+/** Skills, the 萤火浏览器 window agents can drive, and the tool policies (auto / confirm / off). */
 export function ToolsView() {
   const tools = useApp((s) => s.tools);
-  const connections = useApp((s) => s.connections);
   const stats = useApp(selectToolStats, sameRecord);
 
   return (
     <div className="view tools-view">
-      <ViewHeader icon={Plug} title="工具与连接" desc="设置 Agent 调用工具的方式，并查看各项连接的状态。" />
+      <ViewHeader icon={Wrench} title="工具与技能" desc="管理 Agent 能用的技能，准备好萤火浏览器，并设置它调用工具的方式。" />
 
       <div className="callout callout--neutral" role="note">
         <Info size={18} aria-hidden className="callout__icon" />
         <div className="callout__body">
           <p className="callout__text">
-            工具策略同时作用于演示和接入的模型：命令行 Agent 要用某个工具时，按这里的设置自动执行、先问你或直接拒绝。下方「连接状态」是演示数据。
+            工具策略作用于所有任务里的命令行 Agent：它要用某个工具时，按这里的设置自动执行、先问你，或直接拒绝。Claude Code 和 Kimi / Qwen / MiniMax Code 逐项遵守；Codex 不能逐项确认，只按沙箱区分能否写文件和联网搜索；DeepSeek Harness 按它自己的权限设置执行。通过 API 接入的模型只思考和写作，不会调用工具。
           </p>
         </div>
       </div>
@@ -60,12 +58,6 @@ export function ToolsView() {
             </ul>
           </div>
         </div>
-      </Panel>
-
-      <Panel label="连接" title="连接状态" icon={Plug} energy actions={<SimTag />}>
-        <ul className="tools-conns">
-          {connections.map((c) => <ConnectionCard key={c.id} conn={c} />)}
-        </ul>
       </Panel>
     </div>
   );

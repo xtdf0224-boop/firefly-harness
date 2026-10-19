@@ -2,7 +2,7 @@
    text on top and a row of small chips underneath (mode, model, folder, permissions), and a round
    send button that turns into a stop button while she is replying. Centered on the home page,
    docked under the conversation elsewhere. Enter sends, Shift+Enter breaks the line. */
-import { ArrowUp, ChevronDown, Square } from 'lucide-react';
+import { ArrowUp, Square } from 'lucide-react';
 import { useCallback, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import { cx } from '../ui';
 
@@ -26,6 +26,8 @@ export interface PromptBoxProps {
   /** Send is allowed with an empty box (e.g. a chat may start empty). */
   allowEmpty?: boolean;
   sending?: boolean;
+  /** Why nothing can be sent right now (e.g. no model is set up). Typing still works; the reason is the send button's tooltip. */
+  blocked?: string;
   invalid?: boolean;
   describedBy?: string;
   inputRef?: Ref<HTMLTextAreaElement>;
@@ -35,7 +37,7 @@ export interface PromptBoxProps {
 }
 
 export function PromptBox({
-  variant, value, onChange, onSubmit, placeholder, label, chips, hint, busy, onStop, allowEmpty, sending, invalid, describedBy, inputRef,
+  variant, value, onChange, onSubmit, placeholder, label, chips, hint, busy, onStop, allowEmpty, sending, blocked, invalid, describedBy, inputRef,
   minRows = variant === 'home' ? 3 : 1, maxRows = 8, id,
 }: PromptBoxProps) {
   const own = useRef<HTMLTextAreaElement | null>(null);
@@ -60,7 +62,7 @@ export function PromptBox({
   }, [value, minRows, maxRows]);
 
   const empty = !value.trim();
-  const canSend = !sending && (allowEmpty || !empty);
+  const canSend = !sending && !blocked && (allowEmpty || !empty);
   // A few fireflies lift off the send button each time something is sent.
   const [sparks, setSparks] = useState(0);
   const send = () => {
@@ -98,7 +100,7 @@ export function PromptBox({
               <Square size={13} aria-hidden fill="currentColor" />
             </button>
           ) : (
-            <button type="button" className="pbox__send" aria-label={`${label}：发送`} title="发送（Enter）" disabled={!canSend} onClick={send}>
+            <button type="button" className="pbox__send" aria-label={`${label}：发送`} title={blocked ?? '发送（Enter）'} disabled={!canSend} onClick={send}>
               <ArrowUp size={18} aria-hidden />
             </button>
           )}
@@ -111,52 +113,5 @@ export function PromptBox({
       </div>
       {hint && <p className="pbox__hint">{hint}</p>}
     </div>
-  );
-}
-
-/** Like ChipSelect, with option groups (ChatGPT-style model menu: one group per service and way). */
-export function ChipGroupSelect({ icon: Icon, label, value, groups, onChange, title, disabled, display }: {
-  icon?: typeof ChevronDown;
-  label: string;
-  value: string;
-  groups: Array<{ label: string; options: Array<{ value: string; label: string }> }>;
-  onChange: (v: string) => void;
-  title?: string;
-  disabled?: boolean;
-  /** Text shown on the closed chip (the select itself stays on top, invisible, and takes the clicks). */
-  display?: string;
-}) {
-  return (
-    <span className={cx('pchip pchip--select', display && 'pchip--overlay', disabled && 'is-disabled')} title={title}>
-      {Icon && <Icon size={13} aria-hidden />}
-      {display && <span className="pchip__text" aria-hidden>{display}</span>}
-      <select aria-label={label} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
-        {groups.map((g) => (g.options.length === 1 && !g.label
-          ? <option key={g.options[0].value} value={g.options[0].value}>{g.options[0].label}</option>
-          : <optgroup key={g.label} label={g.label}>{g.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</optgroup>))}
-      </select>
-      <ChevronDown size={12} aria-hidden className="pchip__chev" />
-    </span>
-  );
-}
-
-/** A native select drawn as a chip (keyboard and screen readers get a real select). */
-export function ChipSelect<T extends string>({ icon: Icon, label, value, options, onChange, title, disabled }: {
-  icon?: typeof ChevronDown;
-  label: string;
-  value: T;
-  options: Array<{ value: T; label: string }>;
-  onChange: (v: T) => void;
-  title?: string;
-  disabled?: boolean;
-}) {
-  return (
-    <span className={cx('pchip pchip--select', disabled && 'is-disabled')} title={title}>
-      {Icon && <Icon size={13} aria-hidden />}
-      <select aria-label={label} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value as T)}>
-        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-      <ChevronDown size={12} aria-hidden className="pchip__chev" />
-    </span>
   );
 }

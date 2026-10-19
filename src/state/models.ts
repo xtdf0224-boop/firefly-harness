@@ -2,10 +2,10 @@
    process, CLI detection, login and connection tests. */
 import { desktop, type StartSpec } from '../lib/desktop';
 import {
-  DRIVERS, PROVIDERS, PROVIDER_BY_ID, apiBaseUrl, contextOf, defaultProviderConfig, engineLabel, readiness, regionOf,
+  DRIVERS, PROVIDERS, PROVIDER_BY_ID, apiBaseUrl, contextOf, ctxLabel, defaultProviderConfig, engineLabel, modelInfo, readiness, regionOf, shortModelNote, tidyModelLabel,
 } from '../lib/providers';
-import { EFFORT_LABEL, effortLevels, type Effort, type LiveModel } from '../lib/effort';
-import type { AuthMode, DriverId, ModelState, ProviderConfig, ProviderId, TaskEngine } from '../lib/types';
+import { EFFORT_HINT, EFFORT_LABEL, effortLevels, type Effort, type LiveModel } from '../lib/effort';
+import type { AgentEngine, AuthMode, DriverId, ModelState, ProviderConfig, ProviderId, TaskEngine } from '../lib/types';
 import { announce, toast } from './engine';
 import { refreshSkills } from './skills';
 import { compatEnv } from './live';
@@ -16,7 +16,7 @@ export function initialModels(): ModelState {
     providers: Object.fromEntries(PROVIDERS.map((p) => [p.id, defaultProviderConfig(p)])) as Record<ProviderId, ProviderConfig>,
     desktop: !!desktop,
     encryption: false,
-    defaultEngine: 'demo',
+    defaultEngine: '',
   };
 }
 
@@ -32,7 +32,7 @@ export function restoreModels(saved: Partial<ModelState> | undefined): ModelStat
     if (!p.regions.some((r) => r.id === merged.region)) merged.region = p.regions[0].id;
     base.providers[p.id] = merged;
   }
-  base.defaultEngine = saved.defaultEngine && (saved.defaultEngine === 'demo' || PROVIDER_BY_ID[saved.defaultEngine]) ? saved.defaultEngine : 'demo';
+  base.defaultEngine = saved.defaultEngine && PROVIDER_BY_ID[saved.defaultEngine as ProviderId] ? saved.defaultEngine as ProviderId : '';
   return base;
 }
 
@@ -96,7 +96,7 @@ export const modelActions = {
     const c = store.get().models.providers[id];
     if (values.driver || values.cliPath !== undefined || (values.auth === 'cli' && !c.cli)) void detectCli(id, true);
   },
-  setDefault(engine: 'demo' | ProviderId) {
+  setDefault(engine: ProviderId) {
     store.update((d) => { d.models.defaultEngine = engine; });
   },
   async saveKey(id: ProviderId, key: string) {
@@ -180,7 +180,10 @@ export interface EngineChoice {
   provider: ProviderId;
   auth: AuthMode;
   driver?: DriverId;
+  /** The model set on 模型接入 ('' = the tool's default). */
   model: string;
+  /** The default 推理强度 set on 模型接入. */
+  effort?: Effort;
   label: string;
   tested: boolean;
 }
@@ -195,6 +198,7 @@ export function engineChoices(m: ModelState): EngineChoice[] {
       const model = auth === 'api' ? c.model : c.cliModel;
       out.push({
         key: `${p.id}:${auth}`, provider: p.id, auth, driver: auth === 'cli' ? c.driver : undefined, model,
+        effort: auth === 'api' ? c.effort : c.cliEffort,
         label: engineLabel(p, auth, c.driver, model),
         tested: !!c.test?.ok && c.test.auth === auth && (auth === 'api' || c.test.driver === c.driver),
       });
@@ -209,22 +213,72 @@ export function modelOptions(m: ModelState, choice: Pick<EngineChoice, 'provider
   const c = m.providers[choice.provider];
   const out: LiveModel[] = [];
   const add = (x: LiveModel) => { if (!out.some((y) => y.id === x.id)) out.push(x); };
+  const named = (id: string, note?: string): LiveModel => {
+    const info = modelInfo(p, id);
+    return { id, label: info?.label ?? id, note: [note ?? info?.note, ctxLabel(info?.ctx)].filter(Boolean).join(' · ') || undefined };
+  };
   if (choice.auth === 'api') {
-    for (const x of p.models) add({ id: x.id, label: x.id, note: x.note });
-    if (c.model) add({ id: c.model, label: c.model, note: '模型接入里填写的' });
+    for (const x of p.models) add(named(x.id));
+    if (c.model) add(named(c.model, '自定义'));
     return out;
   }
   const driver = choice.driver ?? c.driver;
+  const tool = DRIVERS[driver].label;
   const live = m.live?.[driver];
   if (live?.length) {
-    add({ id: '', label: '默认', note: `${live.find((x) => x.isDefault)?.label ?? '工具自己选'}` });
-    for (const x of live) add(x);
+    const def = live.find((x) => x.isDefault);
+    add({ id: '', label: `默认（${tool} 自己选）`, note: def ? `现在是 ${modelInfo(p, def.id)?.label ?? tidyModelLabel(def.label)}` : undefined });
+    // The CLI's own list: version names in the catalog's style, short Chinese notes instead of its English blurbs.
+    for (const x of live) {
+      const info = modelInfo(p, x.id);
+      add({ ...x, label: info?.label ?? tidyModelLabel(x.label), note: [info?.note ?? shortModelNote(x.note), ctxLabel(info?.ctx)].filter(Boolean).join(' · ') || undefined });
+    }
   } else {
-    for (const x of p.cliModels[driver] ?? []) add({ id: x.id, label: x.id || '默认', note: x.note });
-    if (!out.some((x) => x.id === '')) out.unshift({ id: '', label: '默认', note: '工具自己选' });
+    for (const x of p.cliModels[driver] ?? []) add(x.id ? named(x.id, x.note) : { id: '', label: `默认（${tool} 自己选）` });
+    if (!out.some((x) => x.id === '')) out.unshift({ id: '', label: `默认（${tool} 自己选）` });
   }
-  if (c.cliModel) add({ id: c.cliModel, label: c.cliModel, note: '模型接入里填写的' });
+  if (c.cliModel) add(named(c.cliModel, '自定义'));
   return out;
+}
+
+/** Value of one entry in a model menu: `${choice.key}|${model}`. */
+export const menuValue = (key: string, model: string) => `${key}|${model}`;
+export function parseMenuValue(v: string): { key: string; model: string } {
+  const [key, ...rest] = v.split('|');
+  return { key, model: rest.join('|') };
+}
+
+/** The grouped model menu (one group per vendor and way, models with their version names), shaped for
+    MenuSelect. Shared by the message box chips, the Agent page and anywhere else a model is picked. */
+export function modelMenuGroups(m: ModelState): Array<{ label: string; hint?: string; options: Array<{ value: string; label: string; sub?: string; meta?: string }> }> {
+  return engineChoices(m).map((c) => {
+    const p = PROVIDER_BY_ID[c.provider];
+    const how = c.auth === 'api' ? 'API' : DRIVERS[c.driver ?? p.drivers[0]].label;
+    return {
+      label: `${p.name} · ${how}`,
+      hint: c.auth === 'api' ? 'API 密钥' : DRIVERS[c.driver ?? p.drivers[0]].auth === 'account' ? '账号登录' : '用 API 密钥',
+      options: modelOptions(m, c).map((x) => ({ value: menuValue(c.key, x.id), label: x.label, sub: x.id || undefined, meta: x.note })),
+    };
+  });
+}
+
+/** The 推理强度 menu for a choice + model: 默认 first, then each level with its hint. */
+export function effortMenu(levels: Effort[], defaultLabel = '默认'): Array<{ value: string; label: string; sub?: string }> {
+  return [{ value: '', label: defaultLabel, sub: '用模型自己的默认强度' }, ...levels.map((l) => ({ value: l, label: EFFORT_LABEL[l], sub: EFFORT_HINT[l] }))];
+}
+
+/** The engine choice new tasks start with: the default vendor (if ready), else the first ready one. */
+export function defaultChoice(m: ModelState, choices = engineChoices(m)): EngineChoice | undefined {
+  return (m.defaultEngine ? choices.find((c) => c.provider === m.defaultEngine) : undefined) ?? choices[0];
+}
+
+/** An agent's own model as a TaskEngine, or undefined when it follows the task (or its way is not ready any more). */
+export function agentEngine(m: ModelState, ae: AgentEngine | undefined, extra: Pick<TaskEngine, 'cwd' | 'access' | 'browser'>): TaskEngine | undefined {
+  if (!ae) return undefined;
+  const choice = engineChoices(m).find((c) => c.key === ae.key);
+  if (!choice) return undefined;
+  const levels = choiceEfforts(m, choice, ae.model);
+  return engineFromChoice(choice, { ...extra, model: ae.model, effort: ae.effort && levels.includes(ae.effort) ? ae.effort : undefined });
 }
 
 /** Effort levels for a choice + model (empty = cannot be tuned). */

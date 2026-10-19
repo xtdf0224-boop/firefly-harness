@@ -4,6 +4,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const listeners = new Set();
 ipcRenderer.on('ai:event', (_e, ev) => { for (const l of listeners) l(ev); });
+const commands = new Set();
+ipcRenderer.on('app:command', (_e, cmd) => { for (const l of commands) l(cmd); });
 
 contextBridge.exposeInMainWorld('fireflyDesktop', {
   version: 1,
@@ -22,6 +24,12 @@ contextBridge.exposeInMainWorld('fireflyDesktop', {
   answer: (id, requestId, decision, input) => ipcRenderer.invoke('ai:answer', id, requestId, decision, input),
   stop: (id, how) => ipcRenderer.invoke('ai:stop', id, how),
   onEvent: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
+  /** The shell around the page: tray preferences, system notifications, commands from the tray menu. */
+  app: {
+    setPrefs: (prefs) => ipcRenderer.send('app:prefs', prefs),
+    notify: (n) => ipcRenderer.send('app:notify', n),
+    onCommand: (fn) => { commands.add(fn); return () => commands.delete(fn); },
+  },
   browser: {
     open: () => ipcRenderer.invoke('browser:open'),
     clear: () => ipcRenderer.invoke('browser:clear'),

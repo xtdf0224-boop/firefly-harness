@@ -1,16 +1,16 @@
 {
   "name": "firefly-harness",
-  "version": "0.2.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "萤火 · Agent 工作台 — 以《崩坏：星穹铁道》流萤 / 萨姆为灵感的 AI Agent Harness 桌面工作台（非官方同人项目，当前为模拟后端演示）",
+  "description": "萤火 · Agent 工作台 — 以《崩坏：星穹铁道》流萤 / 萨姆为灵感的 AI Agent Harness 桌面工作台（非官方同人项目）",
   "type": "module",
   "scripts": {
     "dev": "vite --port 5317 --strictPort",
     "build": "vite build",
     "preview": "vite preview --port 5318 --strictPort",
     "typecheck": "tsc --noEmit",
-    "verify": "tsc --noEmit && npm run check:engine && vite build && node scripts/check-build.mjs",
-    "check:engine": "rolldown scripts/engine-check.ts --platform node --format esm --file node_modules/.cache/engine-check.mjs && node node_modules/.cache/engine-check.mjs",
+    "verify": "tsc --noEmit && npm run check:unit && vite build && node scripts/check-build.mjs",
+    "check:unit": "rolldown scripts/unit-check.ts --platform node --format esm --file node_modules/.cache/unit-check.mjs && node node_modules/.cache/unit-check.mjs",
     "legal": "rolldown scripts/gen-legal.ts --platform node --format esm --file node_modules/.cache/gen-legal.mjs && node node_modules/.cache/gen-legal.mjs",
     "app": "vite build && electron .",
     "dist:win": "npm run legal && npm run verify && electron-builder --win nsis portable"
@@ -48,6 +48,8 @@
       "dist/**/*",
       "electron/**/*",
       "examples/skills/**/*",
+      "build/icon.ico",
+      "build/icon.png",
       "package.json",
       "!**/*.map"
     ],
@@ -79,6 +81,10 @@
         "zh_CN"
       ],
       "artifactName": "FireflyHarness-Setup-${version}.exe",
+      "include": "build/installer.nsh",
+      "installerSidebar": "build/installer/sidebar.bmp",
+      "uninstallerSidebar": "build/installer/sidebar.bmp",
+      "installerHeader": "build/installer/header.bmp",
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true
     },

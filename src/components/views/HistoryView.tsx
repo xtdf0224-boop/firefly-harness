@@ -4,10 +4,10 @@ import { clock, percent, tokens } from '../../lib/format';
 import { RUN_STATUS } from '../../lib/status';
 import { actions } from '../../state/actions';
 import { useApp } from '../../state/store';
-import { Button, EmptyState, Panel, SimTag, cx } from '../ui';
+import { Button, EmptyState, Panel, cx } from '../ui';
 import { HistoryTable } from './config/HistoryTable';
 import { isFinished, matchesFilter, selectHistoryRows, type StatusFilter } from './config/historyData';
-import { sameList, selectDataSource } from './config/util';
+import { sameList } from './config/util';
 import { ViewHeader } from './config/ViewHeader';
 
 const FILTERS: Array<{ id: StatusFilter; label: string; icon: LucideIcon }> = [
@@ -21,8 +21,6 @@ const FILTERS: Array<{ id: StatusFilter; label: string; icon: LucideIcon }> = [
 /** Every run of every task: summary tiles, status filters, search and the table. */
 export function HistoryView() {
   const rows = useApp(selectHistoryRows, sameList);
-  // Pure pre-generated history reads 示例数据; once any live simulated run exists the totals are 模拟.
-  const source = useApp(selectDataSource);
   const [filter, setFilter] = useState<StatusFilter>('all');
   const [query, setQuery] = useState('');
   const searchId = useId();
@@ -66,20 +64,19 @@ export function HistoryView() {
 
   return (
     <div className="view history-view">
-      <ViewHeader icon={History} title="运行历史" desc="所有任务的每一次运行。统计来自模拟器与示例数据，不是真实运行记录。" />
+      <ViewHeader icon={History} title="运行历史" desc="所有工作任务的每一次运行：用了哪个模型、花了多久、用了多少 Token。闲聊不产生运行记录。" />
 
-      <ul className="history-tiles" aria-label="运行统计">
-        {tiles.map((t) => (
-          <li key={t.id} className="history-tile">
-            <div className="history-tile__top">
+      {rows.length > 0 && (
+        <ul className="history-tiles" aria-label="运行统计">
+          {tiles.map((t) => (
+            <li key={t.id} className="history-tile">
               <p className="label">{t.label}</p>
-              <SimTag source={source} />
-            </div>
-            <p className="history-tile__value">{t.value}</p>
-            <p className="history-tile__sub">{t.sub}</p>
-          </li>
-        ))}
-      </ul>
+              <p className="history-tile__value">{t.value}</p>
+              <p className="history-tile__sub">{t.sub}</p>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <Panel
         title="运行记录"
@@ -92,7 +89,7 @@ export function HistoryView() {
           <EmptyState
             icon={History}
             title="还没有运行记录"
-            body="新建任务并开始运行后，每一次运行都会记录在这里。"
+            body="在「新建」里选「工作」，把一个目标交给 Agent，它的每一次运行都会记录在这里。"
             actions={<Button variant="primary" icon={Plus} onClick={() => actions.navigate('new')}>新建任务</Button>}
           />
         ) : (

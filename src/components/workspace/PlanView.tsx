@@ -5,7 +5,7 @@ import { useEffect, useRef } from 'react';
 import { duration } from '../../lib/format';
 import { useNow, useReducedMotion } from '../../lib/hooks';
 import { shallow, useApp } from '../../state/store';
-import { AgentAvatar, Panel, SimTag, StatusChip } from '../ui';
+import { AgentAvatar, EngineTag, Panel, StatusChip } from '../ui';
 import { RUN_OPEN, stepDuration, stepMeta } from './shared';
 
 const SKELETON_ROWS = [0, 1, 2, 3];
@@ -19,7 +19,7 @@ export interface PlanViewProps {
 export function PlanView({ runId, onOpenStep }: PlanViewProps) {
   const run = useApp((s) => {
     const r = runId ? s.runs[runId] : undefined;
-    return r ? { plan: r.plan, planReady: r.planReady, status: r.status, source: r.source } : undefined;
+    return r ? { plan: r.plan, planReady: r.planReady, status: r.status } : undefined;
   }, shallow);
   const agents = useApp((s) => s.agents);
   const reduced = useReducedMotion();
@@ -49,7 +49,6 @@ export function PlanView({ runId, onOpenStep }: PlanViewProps) {
     <Panel
       id="ws-plan" className="ws-plan" label="任务计划" energy flush bodyClassName="ws-plan__body"
       title={steps ? `计划 · ${steps.length} 步` : '计划'}
-      actions={run && <SimTag source={run.source} compact />}
     >
       {steps ? (
         <ol className="ws-plan__list" role="list" ref={listRef}>
@@ -80,6 +79,7 @@ export function PlanView({ runId, onOpenStep }: PlanViewProps) {
                         </span>
                       )}
                       <StatusChip meta={meta} size="sm" />
+                      {step.engineLabel && <EngineTag label={step.engineLabel} compact />}
                       {dur != null && <span className="ws-plan__dur">{duration(dur)}</span>}
                     </span>
                     {step.note && <span className="ws-plan__note">{step.note}</span>}

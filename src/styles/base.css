@@ -31,8 +31,8 @@ h1, h2, h3, h4, p, ul, ol, dl, dd, figure, pre { margin: 0; }
 h1, h2, h3, h4 { font-weight: var(--fw-semibold); line-height: var(--lh-tight); letter-spacing: 0.01em; }
 ul, ol { padding: 0; list-style: none; }
 button, input, textarea, select { font: inherit; color: inherit; }
-button { cursor: pointer; background: none; border: 0; padding: 0; }
-button:disabled { cursor: not-allowed; }
+button { cursor: var(--cur-pointer); background: none; border: 0; padding: 0; }
+button:disabled { cursor: var(--cur-not-allowed); }
 a { color: var(--mint); text-underline-offset: 3px; }
 code, pre, kbd, samp { font-family: var(--font-mono); }
 img, svg { display: block; }

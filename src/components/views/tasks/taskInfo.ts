@@ -3,7 +3,7 @@
    five times a second). */
 import { CircleDashed, MessageCircle } from 'lucide-react';
 import { RUN_STATUS, isOpenRun, type StatusMeta } from '../../../lib/status';
-import type { AgentId, AppState, DataSource } from '../../../lib/types';
+import type { AgentId, AppState } from '../../../lib/types';
 import { latestRun, stepProgress, type TaskStatus } from '../../../state/selectors';
 import { shallow } from '../../../state/store';
 
@@ -18,7 +18,6 @@ export interface TaskSummary {
   id: string;
   title: string;
   goal: string;
-  source: DataSource;
   createdAt: number;
   updatedAt: number;
   agentIds: AgentId[];
@@ -33,7 +32,7 @@ export interface TaskSummary {
   /** Failure message of the latest run when it failed ('' when the run gave none). */
   failure?: string;
   kind: 'chat' | 'work';
-  /** Real model label, when the task runs on one. */
+  /** The model the task runs on, e.g. 「Claude Sonnet 5.5 · Claude Code」; undefined if none was ever picked. */
   engine?: string;
 }
 
@@ -49,9 +48,6 @@ export function selectSummaries(s: AppState): TaskSummary[] {
       id,
       title: task.title,
       goal: task.goal,
-      // A retry of a sample task creates a live-simulated run, and everything else on the row
-      // (status, progress, failure) comes from that run, so the provenance follows the latest run.
-      source: run?.source ?? task.source,
       createdAt: task.createdAt,
       updatedAt: task.updatedAt,
       agentIds: task.agentIds,

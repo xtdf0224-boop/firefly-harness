@@ -6,7 +6,7 @@ import { memo, useId } from 'react';
 import { relative } from '../../../lib/format';
 import type { Agent, Tone } from '../../../lib/types';
 import { actions } from '../../../state/actions';
-import { AgentAvatar, Badge, EngineTag, IconButton, Meter, SimTag, StatusChip, cx } from '../../ui';
+import { AgentAvatar, Badge, EngineTag, IconButton, Meter, StatusChip, cx } from '../../ui';
 import { metaOf, progressText, runText, type TaskSummary } from './taskInfo';
 
 const METER_TONE: Partial<Record<TaskSummary['status'], Tone>> = {
@@ -30,7 +30,7 @@ export const TaskRow = memo(function TaskRow({ task, agents, now }: { task: Task
   const hasRun = task.status !== 'draft' && task.kind !== 'chat';
   const progress = progressText(task);
   const names = task.agentIds.map((id) => agents.find((a) => a.id === id)?.name).filter(Boolean).join('、');
-  const sourceText = task.engine ? `真实模型：${task.engine}` : task.source === 'sample' ? '示例数据' : '模拟';
+  const engineText = task.engine ? `使用模型：${task.engine}` : '还没有选模型';
   const updated = relative(task.updatedAt, now);
   const description = [
     meta.label,
@@ -40,7 +40,7 @@ export const TaskRow = memo(function TaskRow({ task, agents, now }: { task: Task
     progress,
     names ? `参与：${names}` : '',
     `更新于 ${updated}`,
-    sourceText,
+    engineText,
   ].filter(Boolean).join('，');
 
   return (
@@ -79,7 +79,7 @@ export const TaskRow = memo(function TaskRow({ task, agents, now }: { task: Task
           )}
           <span className="task-list-row__line">
             <AgentStack agents={agents} ids={task.agentIds} />
-            {task.engine && task.source === 'live' ? <EngineTag label={task.engine} compact /> : <SimTag source={task.source} />}
+            {task.engine ? <EngineTag label={task.engine} compact /> : <Badge tone="warning" title="这个任务还没有选模型，打开后可以选一个">未选模型</Badge>}
           </span>
         </span>
         <span className="sr-only" id={`${uid}-d`}>{description}</span>

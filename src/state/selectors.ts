@@ -1,6 +1,5 @@
 import type { AgentActivity, AgentId, AppState, Approval, Run, RunStatus, Task } from '../lib/types';
 import { isOpenRun } from '../lib/status';
-import { GATEWAY_ID } from './engine';
 
 export type TaskStatus = RunStatus | 'draft';
 
@@ -40,13 +39,9 @@ export function stepProgress(run?: Run) {
   return { done, skipped, finished: done + skipped, total: run.plan.length, current };
 }
 
-export const gateway = (s: AppState) => s.connections.find((c) => c.id === GATEWAY_ID);
-
 /** What an agent is doing in the context of a run. */
-export function agentActivity(s: AppState, run: Run | undefined, agentId: AgentId): AgentActivity {
+export function agentActivity(_s: AppState, run: Run | undefined, agentId: AgentId): AgentActivity {
   if (!run || !isOpenRun(run.status)) return 'idle';
-  const gw = gateway(s);
-  if (gw && (gw.status === 'disconnected' || gw.status === 'reconnecting')) return 'offline';
   if (run.live?.agentId !== agentId) return 'idle';
   if (run.status === 'paused') return 'paused';
   if (run.status === 'awaiting') return 'waiting';

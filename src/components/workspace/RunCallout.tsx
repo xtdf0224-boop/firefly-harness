@@ -2,19 +2,21 @@
    the run as a full ApprovalCard (preview capped and laid out beside the facts, see workspace.css,
    so the plan and tabs stay in view while the run waits). Failed runs use role="alert";
    everything else role="status". */
-import { CirclePlay, Cpu, FlaskConical, Loader, Package, Play, RotateCcw, Terminal, type LucideIcon } from 'lucide-react';
+import { CirclePlay, Cpu, Loader, Package, Play, RotateCcw, Terminal, type LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { clock } from '../../lib/format';
+import { DRIVERS } from '../../lib/providers';
 import { RUN_STATUS } from '../../lib/status';
-import type { Approval, RunStatus } from '../../lib/types';
+import type { Approval, RunStatus, TaskEngine } from '../../lib/types';
 import { actions } from '../../state/actions';
-import { gatewayUp } from '../../state/engine';
 import { shallow, useApp } from '../../state/store';
 import { Button, cx } from '../ui';
 import { ApprovalCard } from '../shell/ApprovalCard';
-import { stepCounts } from './shared';
+import { ModelNotice } from './ModelNotice';
+import { RUN_OPEN, stepCounts, useTaskEngine } from './shared';
 
 const NO_APPROVALS: Approval[] = [];
+const NO_MODEL = '这个任务的模型现在不可用';
 
 type CalloutTone = 'neutral' | 'running' | 'success' | 'warning' | 'danger' | 'paused';
 
@@ -34,11 +36,20 @@ function Callout({ tone, icon: Icon, title, children, actions: buttons, role = '
   );
 }
 
-const PAUSE_TEXT: Record<'user' | 'disconnected' | 'reload', string> = {
+const PAUSE_TEXT: Record<'user' | 'reload', string> = {
   user: '你暂停了运行。',
-  disconnected: '连接断开后自动暂停，恢复连接后可继续。',
   reload: '页面重新载入后已暂停。',
 };
+
+/** What the model may do on its own, said the way this way of running really works. */
+function accessNote(engine: TaskEngine) {
+  if (engine.auth === 'api') return '用 API 方式时，结果只在对话里给出，不会改动文件或执行命令。';
+  const driver = engine.driver && DRIVERS[engine.driver];
+  if (!driver) return '';
+  return driver.approvals === 'per-call'
+    ? '写文件、执行命令等操作按「工具与技能」里的设置执行，需要确认的会先问你。'
+    : `${driver.label} 按沙箱策略执行，不会逐项征求你的确认。`;
+}
 
 export interface RunCalloutProps {
   taskId: string;
@@ -60,23 +71,18 @@ export function RunCallout({ taskId, runId, latestId }: RunCalloutProps) {
     };
   }, shallow);
   const pending = useApp((s) => (runId ? s.runs[runId]?.approvals.filter((a) => a.status === 'pending') : undefined) ?? NO_APPROVALS, shallow);
-  const up = useApp(gatewayUp);
-  const engine = useApp((s) => s.tasks[taskId]?.engine?.label);
+  const { engine, state } = useTaskEngine(taskId);
   const lead = useApp((s) => s.agents.find((a) => a.id === 'orchestrator')?.name ?? '编排 Agent');
   const interactive = !!runId && runId === latestId;
+  const ready = state === 'ready';
 
   if (!runId || !run) {
+    if (!ready || !engine) return <div className="ws-callouts"><ModelNotice taskId={taskId} chat={false} /></div>;
     return (
       <Callout tone="neutral" icon={CirclePlay} title="准备就绪">
-        <p className="callout__text">点击开始后，{lead}会先制定计划；写文件、执行命令等操作会先征求你的确认。</p>
+        <p className="callout__text">点击开始后，{lead}会先制定计划。{accessNote(engine)}</p>
         <p className="ws-callout__tag">
-          {engine ? (
-            <span className="engine-tag" title={`真实模型：${engine}`}><Cpu size={11} aria-hidden />将由 {engine} 执行</span>
-          ) : (
-            <span className="sim-tag" title="演示模式：由浏览器内的模拟器生成，没有调用真实模型、工具或命令。">
-              <FlaskConical size={11} aria-hidden />将由模拟器执行
-            </span>
-          )}
+          <span className="engine-tag" title={`使用的模型：${engine.label}`}><Cpu size={11} aria-hidden />将由 {engine.label} 执行</span>
         </p>
       </Callout>
     );
@@ -92,7 +98,7 @@ export function RunCallout({ taskId, runId, latestId }: RunCalloutProps) {
   let callout: ReactNode = null;
   switch (status) {
     case 'queued':
-      callout = <Callout tone="neutral" icon={RUN_STATUS.queued.icon} title="排队中"><p className="callout__text">{engine ? '等待开始执行。' : '等待模拟器开始执行。'}</p></Callout>;
+      callout = <Callout tone="neutral" icon={RUN_STATUS.queued.icon} title="排队中"><p className="callout__text">等待开始执行。</p></Callout>;
       break;
 
     case 'running':
@@ -117,13 +123,12 @@ export function RunCallout({ taskId, runId, latestId }: RunCalloutProps) {
         <Callout
           tone="paused" icon={RUN_STATUS.paused.icon} title="运行已暂停"
           actions={interactive && (
-            <Button variant="primary" size="sm" icon={Play} disabled={!up} title={up ? undefined : '模型网关未连接'} onClick={() => actions.resumeRun(runId)}>继续</Button>
+            <Button variant="primary" size="sm" icon={Play} disabled={!ready} title={ready ? undefined : NO_MODEL} onClick={() => actions.resumeRun(runId)}>继续</Button>
           )}
         >
           <p className="callout__text">
             {PAUSE_TEXT[run.pauseReason ?? 'user']}
             {pending.length > 0 && `还有 ${pending.length} 项操作待确认。`}
-            {!up && interactive && '模型网关未连接，暂时不能继续。'}
           </p>
         </Callout>
       );
@@ -137,7 +142,7 @@ export function RunCallout({ taskId, runId, latestId }: RunCalloutProps) {
           title={step ? `第 ${step.index + 1} 步「${step.title}」失败` : '运行失败'}
           actions={interactive && (
             <>
-              <Button variant="primary" size="sm" icon={RotateCcw} disabled={!up} title={up ? undefined : '模型网关未连接'} onClick={() => actions.retryRun(runId, 'resume')}>从失败处重试</Button>
+              <Button variant="primary" size="sm" icon={RotateCcw} disabled={!ready} title={ready ? undefined : NO_MODEL} onClick={() => actions.retryRun(runId, 'resume')}>从失败处重试</Button>
               <Button variant="ghost" size="sm" icon={Terminal} onClick={() => actions.openConsole('errors')}>查看错误</Button>
             </>
           )}
@@ -173,6 +178,8 @@ export function RunCallout({ taskId, runId, latestId }: RunCalloutProps) {
     }
   }
 
-  if (!callout && !approvalCards) return null;
-  return <div className="ws-callouts">{callout}{approvalCards}</div>;
+  // The latest run is stopped and its model cannot run again: say so (and where to fix it) under the result.
+  const notice = interactive && !ready && (status === 'paused' || !RUN_OPEN.has(status)) ? <ModelNotice taskId={taskId} chat={false} /> : null;
+  if (!callout && !approvalCards && !notice) return null;
+  return <div className="ws-callouts">{callout}{approvalCards}{notice}</div>;
 }
