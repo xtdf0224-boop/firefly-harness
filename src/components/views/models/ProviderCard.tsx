@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { Effort } from '../../../lib/effort';
 import { DRIVERS, contextOf, ctxLabel, readiness, regionOf, type ProviderInfo } from '../../../lib/providers';
 import type { AuthMode, DriverId, ModelState, ProviderConfig } from '../../../lib/types';
-import { choiceEfforts, defaultChoice, effortMenu, modelActions, modelOptions } from '../../../state/models';
+import { TESTING, choiceEfforts, cleanPath, defaultChoice, effortMenu, modelActions, modelOptions } from '../../../state/models';
 import { useApp } from '../../../state/store';
 import { Badge, Button, CopyButton, Segmented, cx } from '../../ui';
 import { MenuSelect } from '../../ui/MenuSelect';
@@ -29,7 +29,7 @@ export function ProviderCard({ info, disabled }: { info: ProviderInfo; disabled:
   const auth = cfg.auth;
   const ready = readiness(info, cfg, auth);
   const tested = cfg.test && cfg.test.auth === auth && (auth === 'api' || cfg.test.driver === cfg.driver) ? cfg.test : undefined;
-  const testing = !!tested && !tested.ok && tested.message === '测试中…';
+  const testing = !!tested && !tested.ok && tested.message === TESTING;
   const state = !ready.ready ? 'off' : tested?.ok ? 'ok' : tested && !testing ? 'error' : 'ready';
   const stateText = state === 'ok' ? '已连通' : state === 'error' ? '测试失败' : state === 'ready' ? '已配置' : '未接入';
   const stateTone = state === 'ok' ? 'success' : state === 'error' ? 'danger' : state === 'ready' ? 'info' : 'neutral';
@@ -115,7 +115,7 @@ function CliPane({ info, cfg, models, disabled, busy, onDetect }: { info: Provid
       <div className={cx('model-cli', cli && (cli.found ? 'is-found' : 'is-missing'))}>
         <div className="model-cli__state">
           {!cli && <span className="model-card__muted">还没有检测</span>}
-          {cli && !cli.found && <span><XCircle size={14} aria-hidden /> 没有找到 {d.bin}{cli.detail ? `：${cli.detail}` : ''}</span>}
+          {cli && !cli.found && <span><XCircle size={14} aria-hidden /> {cli.path && cli.detail ? cli.detail : `没有找到 ${d.bin}${cli.detail ? `：${cli.detail}` : ''}`}</span>}
           {cli?.found && (
             <span className="model-cli__found">
               <CheckCircle2 size={14} aria-hidden />
@@ -125,13 +125,14 @@ function CliPane({ info, cfg, models, disabled, busy, onDetect }: { info: Provid
               {cli.login === 'unknown' && d.auth === 'account' && <Badge tone="neutral" title="这个工具不报告登录状态，测试一次连接即可确认">登录状态未知</Badge>}
             </span>
           )}
+          {cli?.found && cli.detail && <span className="model-card__muted">{cli.detail}</span>}
         </div>
         <div className="model-cli__actions">
           <Button size="sm" variant="ghost" icon={RefreshCw} busy={busy} disabled={disabled} onClick={onDetect}>检测</Button>
           {canLogin && cli?.found && <Button size="sm" variant={cli.login === 'no' ? 'primary' : 'ghost'} icon={LogIn} disabled={disabled} onClick={() => void modelActions.login(info.id)}>登录</Button>}
         </div>
       </div>
-      {cli && !cli.found && (
+      {cli && !cli.found && !cli.path && (
         <p className="model-pane__install">
           <span>安装：</span><code className="mono">{d.install}</code>
           {d.install.startsWith('npm') && <CopyButton text={d.install} label="复制安装命令" />}
@@ -147,8 +148,8 @@ function CliPane({ info, cfg, models, disabled, busy, onDetect }: { info: Provid
         <summary>高级</summary>
         <div className="model-field">
           <label className="model-field__label" htmlFor={`${ids}-p`}>命令路径<span className="model-field__opt">（不在 PATH 里时填写）</span></label>
-          <input id={`${ids}-p`} className="input mono" value={cfg.cliPath} disabled={disabled} spellCheck={false} autoComplete="off"
-            placeholder={`例如 C:\\…\\${d.bin}.cmd`} onChange={(e) => modelActions.set(info.id, { cliPath: e.target.value.trim() })} />
+          <PathField id={`${ids}-p`} value={cfg.cliPath} disabled={disabled} onCommit={(cliPath) => modelActions.set(info.id, { cliPath })}
+            placeholder={cfg.driver === 'dsh' ? '例如 D:\\DeepSeek Harness（它的安装文件夹）' : `例如 C:\\…\\${d.bin}.cmd`} />
         </div>
         {cfg.driver === 'codex' && (
           <div className="model-field">
@@ -164,6 +165,46 @@ function CliPane({ info, cfg, models, disabled, busy, onDetect }: { info: Provid
         )}
       </details>
     </div>
+  );
+}
+
+/** 命令路径: the text stays as typed (a path can hold spaces, and one typed at the end must not be trimmed away) and
+ *  is saved cleaned up on Enter, on leaving the box, or after a pause in typing — each save re-detects the tool. */
+const PATH_PAUSE_MS = 600;
+
+function PathField({ id, value, disabled, placeholder, onCommit }: { id: string; value: string; disabled: boolean; placeholder: string; onCommit: (path: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const live = useRef({ draft, value, onCommit });
+  live.current = { draft, value, onCommit };
+  const timer = useRef<number | undefined>(undefined);
+
+  const stop = () => { window.clearTimeout(timer.current); timer.current = undefined; };
+  const commit = (raw: string) => {
+    stop();
+    const next = cleanPath(raw);
+    if (next !== live.current.value) live.current.onCommit(next);
+  };
+
+  // A change that did not come from this box (the tool was switched, which clears the path) replaces what is typed.
+  useEffect(() => {
+    if (value === cleanPath(live.current.draft)) return;
+    stop();
+    setDraft(value);
+  }, [value]);
+  // Leaving while a pause is pending (the card closes, the way of connecting changes) still saves what was typed.
+  useEffect(() => () => {
+    if (timer.current !== undefined) commit(live.current.draft);
+  }, []);
+
+  return (
+    <input id={id} className="input mono" value={draft} disabled={disabled} spellCheck={false} autoComplete="off" placeholder={placeholder}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        stop();
+        timer.current = window.setTimeout(() => commit(e.target.value), PATH_PAUSE_MS);
+      }}
+      onBlur={() => { commit(draft); setDraft(cleanPath(draft)); }}
+      onKeyDown={(e) => { if (e.key === 'Enter') { commit(draft); setDraft(cleanPath(draft)); } }} />
   );
 }
 

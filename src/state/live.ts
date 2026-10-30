@@ -12,7 +12,7 @@ import { openStream, desktop, type StartSpec, type StreamEvent } from '../lib/de
 import { effortRequest } from '../lib/effort';
 import { json } from '../lib/format';
 import {
-  GREET_PROMPT, NUDGE_PROMPT, PERSONA, completionLine, eventLine, mood, rolePrompt, systemPrompt, type PromptPurpose,
+  GREET_PROMPT, NUDGE_PROMPT, PERSONA, completionLine, eventLine, mood, rolePrompt, systemPrompt, whenText, type PromptPurpose,
 } from '../lib/persona';
 import {
   CLAUDE_HEADLESS_DENY, CLAUDE_TOOLS, DRIVERS, PROVIDER_BY_ID, apiBaseUrl, contextOf, regionOf, toolCategory,
@@ -29,6 +29,9 @@ type D = Draft<AppState>;
 export type Result<T = void> = { ok: true; value: T } | { ok: false; error: string };
 const ok = <T,>(value: T): Result<T> => ({ ok: true, value });
 const fail = (error: string): Result<never> => ({ ok: false, error });
+
+/** The code a driver reports when the session it was asked to resume no longer exists in the CLI. */
+const SESSION_LOST = 'SESSION_LOST';
 
 const TERMINAL_CAP = 800;
 const OPEN = new Set(['queued', 'running', 'paused', 'awaiting']);
@@ -88,7 +91,7 @@ function promptContext(task: Task, purpose: PromptPurpose) {
 const isApi = (e: TaskEngine) => e.auth === 'api';
 
 /** The base of a StartSpec for a task's engine: which program or URL, model, key, folder. */
-function baseSpec(engine: TaskEngine): Result<StartSpec> {
+export function baseSpec(engine: TaskEngine): Result<StartSpec> {
   const info = PROVIDER_BY_ID[engine.provider];
   const cfg = s().models.providers[engine.provider];
   if (!info || !cfg) return fail('这个模型服务不在列表里。');
@@ -102,7 +105,8 @@ function baseSpec(engine: TaskEngine): Result<StartSpec> {
   const driver = engine.driver ?? cfg.driver;
   const d = DRIVERS[driver];
   if (!engine.cwd) return fail('这个任务没有工作文件夹。');
-  const spec: StartSpec = { driver, provider: info.id, path: cfg.cliPath || undefined, cwd: engine.cwd, model: engine.model || undefined, effort: effortRequest(info.id, 'cli', engine.model, engine.effort).effort };
+  // The card's 路径 belongs to the card's current tool: a task still bound to the other one finds its own on PATH.
+  const spec: StartSpec = { driver, provider: info.id, path: driver === cfg.driver ? cfg.cliPath || undefined : undefined, cwd: engine.cwd, model: engine.model || undefined, effort: effortRequest(info.id, 'cli', engine.model, engine.effort).effort };
   if (driver === 'kimi' || driver === 'qwen' || driver === 'mcode') { spec.driver = 'acp'; spec.acp = driver; }
   if (d.auth === 'key' && !cfg.keyHint) return fail(`${d.label} 需要 ${info.name} 的 API Key，请到「模型接入」里保存。`);
   if (driver === 'claude-compat') {
@@ -135,6 +139,25 @@ export function compatEnv(url: string, model: string, ctx?: { tokens: number; kn
 }
 
 const withSkills = (system: string, skills: string) => (skills ? `${system}\n\n${skills}` : system);
+
+/* Claude Code records the system prompt of a session's first turn and sends that record on every later
+   turn, so the prompt has to say the same thing every turn: what changes with the minute (the clock, her
+   mood) is told to a command-line model at the top of the message instead. API turns are rebuilt each
+   time and keep it in the system prompt. */
+
+/** The clock line of systemPrompt(), as a sentence that never changes. */
+const CLOCK_LINE = /^此刻是 .*$/m;
+const CLOCK_RULE = '每条消息开头括号里的「此刻是 …」是工作台标注的当前时间；可以自然地带上时间感，但别每句都提。';
+
+/** The system prompt for a command-line model: the same text on every turn of its session. */
+export function steadySystem(system: string) {
+  return CLOCK_LINE.test(system) ? system.replace(CLOCK_LINE, CLOCK_RULE) : system;
+}
+
+/** The short line at the top of a command-line model's message: when it is, and what she was doing. Not shown in the chat. */
+export function turnContext(persona: boolean, moodText?: string, d = new Date()) {
+  return `（此刻是 ${whenText(d)}${persona && moodText ? `，被叫到之前你正「${moodText}」` : ''}。这行是工作台自己加的，不是对方说的。）`;
+}
 
 /** 浏览器控制 is on for a task, its driver can take MCP servers, and the browser tools are not both disabled. */
 function browserOn(engine: TaskEngine) {
@@ -466,6 +489,37 @@ function runTurn(o: TurnOpts): Promise<TurnResult> {
   });
 }
 
+/** The CLI no longer has the session this turn was to resume (Claude Code clears sessions after 30 days;
+    a cleaned ~/.claude or ~/.codex, a reinstall): forget the id, so no later turn tries it again. */
+function dropSession(taskId: string, agent?: AgentId) {
+  store.update((d) => {
+    const t = d.tasks[taskId];
+    if (!t) return;
+    if (agent) delete t.agentSessions?.[agent];
+    else t.session = undefined;
+  });
+}
+
+/** runTurn; if the CLI reports the session it was told to resume as lost, run the turn once more in a
+    new session. `fresh` builds that spec: with no session id, and with everything the old session knew
+    in its prompt. Only one retry: the second turn has no session to lose. */
+async function runTurnResuming(o: TurnOpts, fresh: () => Result<StartSpec>): Promise<TurnResult> {
+  try {
+    return await runTurn(o);
+  } catch (e) {
+    const err = e as Error & { code?: string };
+    if (err.code !== SESSION_LOST || !o.spec.sessionId) throw e;
+    // Paused or cancelled while the first try was failing: nothing to start again.
+    if (o.runId && !o.chat && halted(o.runId)) throw e;
+    dropSession(o.task.id, o.sessionAgent);
+    const again = fresh();
+    if (!again.ok) throw e;
+    const runId = o.runId;
+    if (runId) store.update((d) => { if (d.runs[runId]) pushEvent(d, { runId, kind: 'agent', level: 'warn', text: '命令行里找不到之前的会话了（可能已被清理），改用新会话重新开始这一轮。' }); });
+    return runTurn({ ...o, spec: again.value });
+  }
+}
+
 /** A CLI agent asks before using a tool: decide by policy, or ask the user. */
 function onPermission(o: TurnOpts, ev: Extract<StreamEvent, { type: 'permission' }>, ensureCall: (d: D, run: Draft<Run>) => Draft<ToolCall> | undefined) {
   const streamId = o.chat ? chatBusy.get(o.task.id) : o.runId ? ctxOf(o.runId).streamId : undefined;
@@ -489,7 +543,8 @@ function onPermission(o: TurnOpts, ev: Extract<StreamEvent, { type: 'permission'
     return;
   }
   const outside = outsideFolders(o.task, ev);
-  if (def?.permission === 'auto' && !outside) { answer('allow'); return; }
+  // A blockedPath is Claude Code's own safety check (.claude/, a protected file…): never waved through, even inside the folder.
+  if (def?.permission === 'auto' && !outside && !ev.blockedPath) { answer('allow'); return; }
 
   const pv = preview(category, ev.name, ev.input);
   let approvalId = '';
@@ -523,17 +578,23 @@ function onPermission(o: TurnOpts, ev: Extract<StreamEvent, { type: 'permission'
 const PATH_KEYS = ['file_path', 'path', 'notebook_path', 'filePath', 'absolute_path', 'dir_path', 'directory'];
 const normPath = (p: string) => p.trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 
-/** The first path a tool request names outside the task folder and the skills folder, if any. */
-function outsideFolders(task: Task, ev: Extract<StreamEvent, { type: 'permission' }>): string {
-  if (ev.blockedPath) return ev.blockedPath;
-  const roots = [task.engine?.cwd, s().skills?.root].filter((x): x is string => !!x).map(normPath);
-  const named = [...(ev.paths ?? []), ...PATH_KEYS.map((key) => ev.input[key]).filter((x): x is string => typeof x === 'string' && !!x.trim())];
+/** The first of `named` that lies outside every folder in `roots` (an absolute path not under one, or a relative one that climbs out), if any. */
+export function outsidePath(roots: string[], named: string[]): string {
+  const norm = roots.map(normPath);
   for (const p of named) {
     const n = normPath(p);
     const absolute = /^([a-z]:)?\//.test(n) || n.startsWith('~') || n.startsWith('//');
-    if (absolute ? !roots.some((r) => n === r || n.startsWith(`${r}/`)) : /(^|\/)\.\.(\/|$)/.test(n)) return p;
+    if (absolute ? !norm.some((r) => n === r || n.startsWith(`${r}/`)) : /(^|\/)\.\.(\/|$)/.test(n)) return p;
   }
   return '';
+}
+
+/** The first path a tool request names outside the task folder and the skills folder, if any. */
+function outsideFolders(task: Task, ev: Extract<StreamEvent, { type: 'permission' }>): string {
+  const roots = [task.engine?.cwd, s().skills?.root].filter((x): x is string => !!x);
+  // Claude Code's blockedPath also names files inside the folder (a PowerShell write): it gets the same check.
+  const named = [ev.blockedPath, ...(ev.paths ?? []), ...PATH_KEYS.map((key) => ev.input[key])].filter((x): x is string => typeof x === 'string' && !!x.trim());
+  return outsidePath(roots, named);
 }
 
 /* ───────────── work runs ───────────── */
@@ -637,10 +698,11 @@ function specFor(task: Task, run: Run, purpose: PromptPurpose, agent: AgentId, p
   const own = toolsOf(agent);
   const useBrowser = browserOn(engine) && access === 'work' && (!own || own.includes('browser_read') || own.includes('browser_act'));
   const role = agent !== 'orchestrator' ? `\n\n${rolePrompt(agent, callName())}` : '';
-  spec.system = withSkills(systemPrompt(purpose === 'plan' || purpose === 'step' ? 'cli' : purpose, promptContext(task, 'cli')) + role, skillText) + (useBrowser ? BROWSER_NOTE : '');
+  const pc = promptContext(task, 'cli');
+  spec.system = withSkills(steadySystem(systemPrompt(purpose === 'plan' || purpose === 'step' ? 'cli' : purpose, pc)) + role, skillText) + (useBrowser ? BROWSER_NOTE : '');
   spec.skills = !!skillText && !inline;
   spec.browser = useBrowser;
-  spec.prompt = prompt;
+  spec.prompt = `${turnContext(pc.persona, pc.mood)}\n\n${prompt}`;
   spec.sessionId = engine === task.engine ? task.session : task.agentSessions?.[agent];
   return ok(policySpec(spec, engine, access, toolsOf(agent)));
 }
@@ -707,7 +769,13 @@ async function planTurn(runId: string, gen: number) {
   if (!spec.ok) throw Object.assign(new Error(spec.error), { code: 'CONFIG' });
   if (isApi(engine)) spec.value.messages = [{ role: 'user', content: planPrompt(task, run, false) }];
   store.update((d) => { const r = d.runs[runId]; if (r) r.live = { agentId: 'orchestrator', activity: 'thinking', text: '拆解目标、制定计划' }; });
-  const res = await runTurn({ task, runId, agentId: 'orchestrator', kind: 'plan', spec: spec.value, view: (raw) => raw.split('```')[0], eager: true });
+  // A plan turn carries the whole task in its prompt: a lost session needs nothing added.
+  const fresh = () => {
+    const t = s().tasks[task.id];
+    const r = live(runId);
+    return t && r ? specFor(t, r, 'plan', 'orchestrator', planPrompt(t, r, cli), 'work') : fail('任务已不存在。');
+  };
+  const res = await runTurnResuming({ task, runId, agentId: 'orchestrator', kind: 'plan', spec: spec.value, view: (raw) => raw.split('```')[0], eager: true }, fresh);
   if (halted(runId, gen) || res.stopReason === 'interrupted') return;
   const allowed: AgentId[] = rosterOf(task);
   const parsed = parsePlan(res.text, allowed)
@@ -753,7 +821,8 @@ async function stepTurn(runId: string, i: number, gen: number) {
   const own = agent !== 'orchestrator' ? run.agentEngines?.[agent] : undefined;
   const engine = own ?? task.engine!;
   const ownCli = !!own && own.auth === 'cli';
-  let prompt = stepPrompt(run, i, extras, !isApi(engine)) + (resumed ? '\n\n（这一步刚才被中断过，请检查已经做了什么，再接着完成。）' : '');
+  const core = stepPrompt(run, i, extras, !isApi(engine)) + (resumed ? '\n\n（这一步刚才被中断过，请检查已经做了什么，再接着完成。）' : '');
+  let prompt = core;
   // A CLI agent on its own model starts without the run's history: brief it once.
   const key = sessionKey(run, agent, engine);
   if (ownCli && !task.agentSessions?.[agent]) prompt = `${briefing(task, run)}\n\n---\n\n${prompt}`;
@@ -762,10 +831,16 @@ async function stepTurn(runId: string, i: number, gen: number) {
   const spec = specFor(task, run, 'step', agent, prompt, 'work', engine);
   if (!spec.ok) throw Object.assign(new Error(own ? `${agentName(s(), agent)}（${own.label}）：${spec.error}` : spec.error), { code: 'CONFIG' });
   if (own) store.update((d) => { const st = d.runs[runId]?.plan[i]; if (st) st.engineLabel = own.label; });
-  const res = await runTurn({
+  // A session that is gone took what it knew with it: the new one is briefed like an agent on its own model.
+  const fresh = () => {
+    const t = s().tasks[task.id];
+    const r = live(runId);
+    return t && r ? specFor(t, r, 'step', agent, `${briefing(t, r)}\n\n---\n\n${core}`, 'work', own ?? t.engine!) : fail('任务已不存在。');
+  };
+  const res = await runTurnResuming({
     task, runId, stepId: step.id, agentId: agent, kind: 'note', spec: spec.value, eager: true,
     sessionAgent: ownCli ? agent : undefined, onlyTools: toolsOf(agent),
-  });
+  }, fresh);
   if (res.stopReason === 'interrupted' || halted(runId, gen)) return;
   store.update((d) => {
     const r = d.runs[runId];
@@ -798,7 +873,12 @@ async function summaryTurn(runId: string, gen: number) {
   if (!spec.ok) throw Object.assign(new Error(spec.error), { code: 'CONFIG' });
   if (key) markShown(runId, key);
   store.update((d) => { const r = d.runs[runId]; if (r) r.live = { agentId: 'orchestrator', activity: 'thinking', text: '整理结果、写总结' }; });
-  const res = await runTurn({ task, runId, agentId: 'orchestrator', kind: 'summary', spec: spec.value, eager: true });
+  const fresh = () => {
+    const t = s().tasks[task.id];
+    const r = live(runId);
+    return t && r ? specFor(t, r, 'summary', 'orchestrator', `${briefing(t, r)}\n\n---\n\n${prompt}`, 'chat') : fail('任务已不存在。');
+  };
+  const res = await runTurnResuming({ task, runId, agentId: 'orchestrator', kind: 'summary', spec: spec.value, eager: true }, fresh);
   if (res.stopReason === 'interrupted' || halted(runId, gen)) return;
   completeLive(runId, res.text);
   // Something sent while the summary was being written still gets an answer.
@@ -1122,8 +1202,9 @@ function note(taskId: string, runId: string | undefined, text: string) {
 
 export function isReplying(taskId: string) { return chatBusy.has(taskId); }
 
-function chatHistory(task: Task, limit = 30) {
-  const msgs = task.messages.filter((m) => (m.role === 'user' || m.role === 'agent') && m.text.trim() && !m.streaming).slice(-limit);
+/** The conversation as an API model should see it: what was said, not the notices of replies that failed. */
+export function chatHistory(task: Task, limit = 30) {
+  const msgs = task.messages.filter((m) => (m.role === 'user' || m.role === 'agent') && m.text.trim() && !m.streaming && m.kind !== 'error').slice(-limit);
   const out: Array<{ role: 'user' | 'assistant'; content: string }> = [];
   for (const m of msgs) {
     const role = m.role === 'user' ? 'user' : 'assistant';
@@ -1158,10 +1239,15 @@ export async function reply(taskId: string, opts: { nudge?: boolean; greet?: boo
   }
   const spec = b.value;
   const lastRun = task.runIds.length ? s().runs[task.runIds[task.runIds.length - 1]] : undefined;
-  let system = systemPrompt(purpose, promptContext(task, purpose));
-  if (opts.followUp && lastRun) {
-    system += `\n\n这是一个工作任务的追问。任务目标：${task.goal}\n最近一次运行（#${lastRun.attempt}，${lastRun.status}）的结果：\n${lastRun.plan.map((st, i) => `${i + 1}. ${st.title}：${(st.result ?? st.note ?? st.status).slice(0, 600)}`).join('\n')}\n这次回复不能使用工具；如果需要再动手，请提醒对方点「重试」或「从头运行」。`;
-  }
+  const pc = promptContext(task, purpose);
+  const cli = !isApi(engine);
+  let system = systemPrompt(purpose, pc);
+  const followUp = opts.followUp && lastRun
+    ? `这是一个工作任务的追问。任务目标：${task.goal}\n最近一次运行（#${lastRun.attempt}，${lastRun.status}）的结果：\n${lastRun.plan.map((st, i) => `${i + 1}. ${st.title}：${(st.result ?? st.note ?? st.status).slice(0, 600)}`).join('\n')}\n这次回复不能使用工具；如果需要再动手，请提醒对方点「重试」或「从头运行」。`
+    : '';
+  // A command-line model's system prompt stays the same all session: the clock and this follow-up background go in its message.
+  if (followUp && !cli) system += `\n\n${followUp}`;
+  if (cli) system = steadySystem(system);
   // Everything said since her last answer (several messages can queue up while she replies).
   const lastAgent = task.messages.map((m) => m.role).lastIndexOf('agent');
   const userText = task.messages.slice(lastAgent + 1).filter((m) => m.role === 'user').map((m) => m.text).join('\n\n');
@@ -1169,7 +1255,8 @@ export async function reply(taskId: string, opts: { nudge?: boolean; greet?: boo
   const skillText = opts.nudge || opts.greet ? '' : skillsPrompt(task, true);
   system = withSkills(system, skillText);
   spec.skills = false;
-  if (isApi(engine)) {
+  let fresh: () => Result<StartSpec> = () => fail('没有会话可以重开。');
+  if (!cli) {
     spec.system = system;
     spec.messages = chatHistory(task);
     if (hint) spec.messages.push({ role: 'user', content: hint });
@@ -1177,19 +1264,24 @@ export async function reply(taskId: string, opts: { nudge?: boolean; greet?: boo
     spec.maxTokens = engine.effort === 'off' ? 4096 : 16000;
   } else {
     spec.system = system;
-    let prompt = hint ?? userText;
-    // A new CLI session (model switched, 重新生成, first CLI turn) has not seen the conversation so far.
-    const past = task.session ? '' : transcript(task, lastAgent + 1);
-    if (past) prompt = `（下面是你们之前的对话记录，接着聊就好，不用复述。）\n\n${past}\n\n---\n\n${prompt}`;
-    spec.prompt = prompt;
+    const background = followUp ? `（背景，不是对方说的话：\n${followUp}）` : '';
+    // A new CLI session (model switched, 重新生成, first CLI turn, a lost session) has not seen the conversation so far.
+    const cliPrompt = (newSession: boolean) => {
+      let prompt = hint ?? userText;
+      const past = newSession ? transcript(task, lastAgent + 1) : '';
+      if (past) prompt = `（下面是你们之前的对话记录，接着聊就好，不用复述。）\n\n${past}\n\n---\n\n${prompt}`;
+      return [turnContext(pc.persona, pc.mood), background, prompt].filter(Boolean).join('\n\n');
+    };
+    spec.prompt = cliPrompt(!task.session);
     spec.sessionId = task.session;
     spec.cwd = engine.cwd;
     policySpec(spec, engine, 'chat');
+    fresh = () => ok({ ...spec, sessionId: undefined, prompt: cliPrompt(true) });
   }
   const started = now();
   chatBusy.set(taskId, 'starting');
   try {
-    await runTurn({ task, runId: opts.followUp ? lastRun?.id : undefined, agentId: 'orchestrator', kind: opts.followUp ? 'reply' : undefined, spec, eager: true, chat: true });
+    await runTurnResuming({ task, runId: opts.followUp ? lastRun?.id : undefined, agentId: 'orchestrator', kind: opts.followUp ? 'reply' : undefined, spec, eager: true, chat: true }, fresh);
   } catch (e) {
     store.update((d) => {
       d.tasks[taskId]?.messages.push({ id: uid('msg'), role: 'agent', agentId: 'orchestrator', kind: 'error', at: now(), persona: v,

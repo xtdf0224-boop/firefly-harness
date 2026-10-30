@@ -106,6 +106,7 @@ export function effortLevels(provider: ProviderId, auth: 'api' | 'cli', driver: 
 /** How a level reaches the model: CLI flag value, or API body fields. */
 export function effortRequest(provider: ProviderId, auth: 'api' | 'cli', model: string, level: Effort | undefined): { effort?: string; extraBody?: Body } {
   // Claude streams its thinking as text only when asked for a summary; ask for it even at the default effort.
+  // (A hand-typed older Claude id or a relay may refuse these fields: api.cjs retries once without them.)
   if (!level) return auth === 'api' && provider === 'claude' ? { extraBody: { thinking: { type: 'adaptive', display: 'summarized' } } } : {};
   if (auth === 'cli') return { effort: level === 'off' ? undefined : level };
   const spec = API[provider];

@@ -15,6 +15,13 @@ import { NO_RUN_META, stepCounts } from './shared';
 
 const NO_ITEMS: string[] = [];
 
+/** The desktop side answers with an error text when the folder is gone or cannot be opened (an empty string means it opened). */
+async function openFolder(dir: string) {
+  let error = '';
+  try { error = (await desktop?.openFolder(dir)) ?? ''; } catch (e) { error = e instanceof Error ? e.message : String(e); }
+  if (error) actions.toast({ tone: 'warning', title: '没能打开工作文件夹', body: error });
+}
+
 export interface RunHeaderProps {
   taskId: string;
   /** The run being viewed (selected, or the latest). */
@@ -61,7 +68,7 @@ export function RunHeader({ taskId, runId, latestId }: RunHeaderProps) {
         </div>
         <div className="panel__actions ws-header__tools">
           {task.cwd && desktop && (
-            <IconButton icon={FolderOpen} variant="ghost" label={`打开工作文件夹：${task.cwd}`} onClick={() => void desktop?.openFolder(task.cwd!)} />
+            <IconButton icon={FolderOpen} variant="ghost" label={`打开工作文件夹：${task.cwd}`} onClick={() => void openFolder(task.cwd!)} />
           )}
           {task.runs > 1 && runId && <RunSelect taskId={taskId} value={runId} />}
           {narrow && (

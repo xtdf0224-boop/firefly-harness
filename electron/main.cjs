@@ -5,7 +5,7 @@
 const { app, BrowserWindow, shell, Menu, Tray, Notification, ipcMain, nativeImage } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
+const { pathToFileURL, format: formatUrl } = require('node:url');
 const ai = require('./ai/index.cjs');
 const browser = require('./ai/browser.cjs');
 
@@ -24,7 +24,7 @@ let quitting = false;
 /** Mirrors 设置 › 关闭窗口时缩小到托盘 (the page tells us on load and on change). */
 let closeToTray = true;
 
-const APP_URL = pathToFileURL(path.join(__dirname, '..', 'dist', 'index.html')).href;
+const APP_PAGE = path.join(__dirname, '..', 'dist', 'index.html');
 const ICON = path.join(__dirname, '..', 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
 const STATE_FILE = () => path.join(app.getPath('userData'), 'window-state.json');
 
@@ -70,18 +70,40 @@ function createTray() {
   tray.on('click', () => (win && win.isVisible() && win.isFocused() ? win.hide() : showWindow()));
 }
 
-/** Only the app's own page may talk to the shell. */
-const fromApp = (e) => !!e.senderFrame && typeof e.senderFrame.url === 'string' && e.senderFrame.url.split('#')[0] === APP_URL;
+/** Every spelling a bundled page's address can take. win.loadFile hands Chromium url.format's file URL, and
+ *  Chromium keeps ~ [ ] and a bare % in it as written, where pathToFileURL writes %7E %5B %5D %25: under
+ *  C:\Users\ADMINI~1\… (a long user name in its 8.3 form, where the portable build unpacks) the two never
+ *  compare equal as text. */
+function pageUrls(file) {
+  return new Set([new URL(formatUrl({ protocol: 'file', slashes: true, pathname: path.resolve(file) })).href, pathToFileURL(file).href]);
+}
+const APP_URLS = pageUrls(APP_PAGE);
+const isAppFile = (u) => typeof u === 'string' && APP_URLS.has(u.split('#')[0]);
+
+/** Only the app's own page may talk to the shell: the sender is the main window's web contents, in its top
+ *  frame (nothing it embeds), and that frame is still on the bundled page. Who it is is decided by identity,
+ *  not by comparing the frame's URL as text; the file check only says it was not navigated elsewhere. */
+function appSenderCheck(getWin, urls) {
+  return (e) => {
+    try {
+      const w = getWin();
+      const wc = e && e.sender;
+      const frame = e && e.senderFrame;
+      return !!w && !!wc && wc === w.webContents && !!frame && frame === wc.mainFrame && typeof frame.url === 'string' && urls.has(frame.url.split('#')[0]);
+    } catch { return false; }
+  };
+}
+const isAppSender = appSenderCheck(() => win, APP_URLS);
 
 ipcMain.on('app:prefs', (e, prefs) => {
-  if (!fromApp(e) || !prefs || typeof prefs !== 'object') return;
+  if (!isAppSender(e) || !prefs || typeof prefs !== 'object') return;
   if (typeof prefs.closeToTray === 'boolean') closeToTray = prefs.closeToTray;
   if (tray) tray.setContextMenu(trayMenu());
 });
 
 // A system notification while the window is hidden or minimized (an approval waiting, a run finished).
 ipcMain.on('app:notify', (e, n) => {
-  if (!fromApp(e) || !n || typeof n.title !== 'string' || !Notification.isSupported()) return;
+  if (!isAppSender(e) || !n || typeof n.title !== 'string' || !Notification.isSupported()) return;
   if (win && win.isVisible() && !win.isMinimized() && win.isFocused()) return;
   const note = new Notification({ title: n.title.slice(0, 80), body: typeof n.body === 'string' ? n.body.slice(0, 240) : '', icon: ICON, silent: false });
   note.on('click', () => (n.command && typeof n.command === 'object' ? command(n.command) : showWindow()));
@@ -115,7 +137,7 @@ function createWindow() {
   Menu.setApplicationMenu(null);
 
   win.once('ready-to-show', () => win && win.show());
-  win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  win.loadFile(APP_PAGE);
 
   // Links with target=_blank (credits, GitHub) open in the default browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -124,9 +146,8 @@ function createWindow() {
   });
   // Never navigate the app window away from the bundled page — not even to another local file
   // (a dropped .html would otherwise run with the desktop bridge).
-  const appUrl = require('node:url').pathToFileURL(path.join(__dirname, '..', 'dist', 'index.html')).href;
   const guard = (event, url) => {
-    if (url.split('#')[0] === appUrl) return;
+    if (isAppFile(url)) return;
     event.preventDefault();
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
   };
@@ -150,10 +171,12 @@ app.on('second-instance', showWindow);
 app.whenReady().then(() => {
   // Windows groups notifications by this id (the installer registers the same one).
   if (process.platform === 'win32') app.setAppUserModelId('io.github.xtdf0224-boop.firefly-harness');
-  ai.register();
+  ai.register({ isAppSender });
   createTray();
   createWindow();
 });
 app.on('window-all-closed', () => { if (quitting || !closeToTray) app.quit(); });
 // Never leave a CLI agent running after the app is gone.
 app.on('before-quit', () => { quitting = true; ai.stopAll(); });
+
+module.exports = { _internals: { pageUrls, appSenderCheck } };

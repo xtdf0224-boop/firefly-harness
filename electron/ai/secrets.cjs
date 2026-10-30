@@ -45,8 +45,11 @@ function hints() {
 
 function save(provider, key) {
   if (!PROVIDERS.has(provider)) throw new Error('未知的模型服务');
-  const clean = String(key || '').trim();
+  // Keys copied from a web page or a chat often carry zero-width characters that trim() leaves in.
+  const clean = String(key || '').replace(/[\u200b-\u200d\u2060\ufeff]/g, '').trim();
   if (clean.length < 8 || clean.length > 4096 || /\s/.test(clean)) throw new Error('密钥格式不对：应为一串不含空格的字符');
+  // Keys are plain ASCII; anything else (中文, 全角符号, …) would fail later as a header error that blames the network.
+  if (!/^[\x21-\x7e]+$/.test(clean)) throw new Error('密钥里有看不见的字符或中文、全角符号，请重新复制');
   if (!available()) throw new Error('系统加密不可用，无法安全保存密钥');
   const data = readAll();
   data[provider] = { hint: hintOf(clean), value: safeStorage.encryptString(clean).toString('base64'), savedAt: Date.now() };

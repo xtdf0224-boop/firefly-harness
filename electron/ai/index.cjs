@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const secrets = require('./secrets.cjs');
-const { resolveCommand, forgetCommand, runOnce, isWin, spawnCli, killTree } = require('./proc.cjs');
+const { resolveCommand, forgetCommand, installDirs, runOnce, isWin, spawnCli, killTree, expandVars, SYS32, cmdExe } = require('./proc.cjs');
 const { streamOpenAI, streamAnthropic } = require('./api.cjs');
 const { runClaude } = require('./claude.cjs');
 const { runCodex } = require('./codex.cjs');
@@ -26,15 +26,37 @@ const DRIVERS = {
   dsh: { bin: 'dsh', label: 'DeepSeek Harness', login: null, loginHint: '请在 DeepSeek Harness 桌面版里登录 DeepSeek 账号，登录状态会共享给命令行。' },
 };
 
+/** The DeepSeek Harness desktop app keeps its CLI inside its own folder. */
+const DSH_CLI = path.join('resources', 'runtime', 'cli', 'bin', 'dsh.cmd');
+
 /** Where the DeepSeek Harness desktop app keeps its CLI when it is not on PATH. */
 function dshCandidates() {
-  const rel = path.join('resources', 'runtime', 'cli', 'bin', 'dsh.cmd');
-  // Only places a normal user cannot plant a dsh.cmd for someone else; anything else goes in 命令路径.
+  // Only places a normal user cannot plant a dsh.cmd for someone else (or, in dshInstalled, the
+  // folder the user's own DSH app runs from); anything else goes in 命令路径.
   const roots = [
     process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs', 'DeepSeek Harness'),
     process.env.ProgramFiles && path.join(process.env.ProgramFiles, 'DeepSeek Harness'),
   ].filter(Boolean);
-  return roots.map((r) => path.join(r, rel));
+  return roots.map((r) => path.join(r, DSH_CLI));
+}
+
+/** DSH installed in a folder of the user's choosing (F:\DSH, say): its installer recorded the folder
+ *  in the installed-programs list (writable only by this user, or by admins for per-machine
+ *  installs). That is the folder the DSH app itself runs from, so its dsh.cmd is trusted as much as
+ *  the app. reg.exe is slowish: looked up once until the next 检测. */
+let dshListed; // undefined = not looked up yet
+function dshInstalled() {
+  if (dshListed === undefined) dshListed = installDirs('DeepSeek Harness').map((d) => path.join(d, DSH_CLI)).find((p) => fs.existsSync(p)) || null;
+  return dshListed;
+}
+
+/** 命令路径 for DSH may name its folder or its app (DeepSeek Harness.exe): the CLI is the dsh.cmd in
+ *  there. Never the app itself — started with --version it would just open its window. */
+function dshInside(p) {
+  const appExe = /(^|[\\/])DeepSeek Harness\.exe$/i.test(p);
+  if (!appExe && !checkDir(p)) return p;
+  const cmd = path.join(appExe ? path.dirname(p) : p, DSH_CLI);
+  return fs.existsSync(cmd) ? cmd : null;
 }
 
 /** CLIs that AIROOM installed for its members live under its data folder, off PATH:
@@ -52,14 +74,34 @@ function managedCandidates(bin) {
   return out;
 }
 
+/** Claude Code's own installer puts claude.exe here and leaves PATH alone (a folder of the user's own profile). */
+function claudeNative() {
+  if (!isWin) return null;
+  const p = path.join(process.env.USERPROFILE || os.homedir(), '.local', 'bin', 'claude.exe');
+  return fs.existsSync(p) ? p : null;
+}
+
+/** 命令路径 as it was typed or pasted: Explorer's 「复制为路径」 wraps it in quotes, and %USERPROFILE% is how a
+ *  Windows user names a folder of their own. One pair of quotes comes off, never any inside the path. */
+function cleanCustom(custom) {
+  let s = typeof custom === 'string' ? custom.trim() : '';
+  const closing = { '"': '"', '“': '”', "'": "'" };
+  if (s.length >= 2 && closing[s[0]] === s[s.length - 1]) s = s.slice(1, -1).trim();
+  return expandVars(s);
+}
+
 function exeFor(driverId, custom) {
   const d = DRIVERS[driverId];
   if (!d) return null;
-  if (custom) return fs.existsSync(custom) && /\.(cmd|exe|bat)$/i.test(custom) ? custom : null;
+  custom = cleanCustom(custom);
+  if (custom) {
+    if (driverId === 'dsh') custom = dshInside(custom);
+    return custom && fs.existsSync(custom) && /\.(cmd|exe|bat)$/i.test(custom) ? custom : null;
+  }
   const found = resolveCommand(d.bin);
   if (found) return found;
   const extra = [...managedCandidates(d.bin), ...(driverId === 'dsh' ? dshCandidates() : [])];
-  return extra.find((p) => fs.existsSync(p)) || null;
+  return extra.find((p) => fs.existsSync(p)) || (driverId === 'dsh' && dshInstalled()) || (driverId === 'claude-code' && claudeNative()) || null;
 }
 
 const EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
@@ -272,11 +314,32 @@ async function detect({ driver, path: custom }) {
   const d = DRIVERS[driver === 'claude-compat' ? 'claude-code' : driver];
   if (!d) return { found: false, detail: '未知的命令行工具' };
   forgetCommand(d.bin);
+  if (driver === 'dsh') dshListed = undefined;
   const exe = exeFor(driver === 'claude-compat' ? 'claude-code' : driver, custom);
-  if (!exe) return { found: false, detail: custom ? '这个路径不存在，或不是可执行文件' : `PATH 里没有找到 ${d.bin}` };
+  const typed = !!cleanCustom(custom);
+  if (!exe && driver === 'dsh') {
+    return { found: false, detail: typed ? '这里没有 dsh 命令：请填 DeepSeek Harness 的安装文件夹，或其中 resources\\runtime\\cli\\bin\\dsh.cmd 的完整路径'
+      : '没有找到 DeepSeek Harness。装了桌面版的话，在「高级」›「命令路径」里填它的安装文件夹' };
+  }
+  if (!exe) return { found: false, detail: typed ? '这个路径不存在，或不是可执行文件' : `PATH 里没有找到 ${d.bin}` };
   const cwd = os.tmpdir();
   const v = await runOnce(exe, ['--version'], { cwd, timeoutMs: 20000 });
-  const version = (v.out || v.err).split(/\r?\n/).map((s) => s.trim()).find(Boolean) || '';
+  const firstLine = (s) => String(s || '').split(/\r?\n/).map((l) => l.trim()).find(Boolean) || '';
+  // stderr is a version only when the command succeeded; after a failure it is the reason, never the version.
+  const version = firstLine(v.out) || (v.code === 0 ? firstLine(v.err) : '');
+  if (v.code === -2 && !version) {
+    // No answer in time is not "missing": a cold start of a big exe under antivirus, or the first run of a uv / Python
+    // CLI. Still usable, so no login probe either (it would wait just as long).
+    return { found: true, path: exe, version: '', login: 'unknown', detail: '版本检查超时（20 秒内没有回应，第一次启动或杀毒软件在扫描时常见），先当作可用；过一会儿可以再点一次「检测」' };
+  }
+  if (v.code !== 0 && !version) {
+    // Found, but it dies at once: typically an npm shim that cannot see node (a fresh Node, fnm, a custom prefix).
+    const why = (firstLine(v.err) || `退出代码 ${v.code}`).slice(0, 200);
+    // Only cmd.exe's own "'node' is not recognized" (in whatever language): a CLI that merely names Node
+    // in its error ("Node.js v16 is not supported") has Node, just not the right one.
+    const hint = /^'"?node(\.exe)?"?'/i.test(why) ? '（多半是 Node 不在萤火的 PATH 里，装好 Node 后再点一次「检测」就行）' : '';
+    return { found: false, path: exe, detail: `找到了 ${exe}，但运行不起来：${why}${hint}` };
+  }
   const out = { found: true, path: exe, version: version.slice(0, 80), login: 'unknown' };
   if (driver === 'claude-code') {
     const s = await runOnce(exe, ['auth', 'status', '--json'], { cwd, timeoutMs: 20000 });
@@ -308,9 +371,17 @@ function openLogin({ driver, path: custom }) {
   // and half a line can even run as a command.
   const file = path.join(os.tmpdir(), `firefly-login-${driver}.ps1`);
   fs.writeFileSync(file, loginScript(d, exe), 'utf8');
-  const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `start "" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${file}"`], { windowsVerbatimArguments: true, detached: true, stdio: 'ignore', windowsHide: false });
+  const [cmd, args] = loginLaunch(file);
+  const child = spawn(cmd, args, { windowsVerbatimArguments: true, detached: true, stdio: 'ignore', windowsHide: false });
   child.unref();
   return { ok: true, command: `${d.bin} ${d.login.join(' ')}` };
+}
+
+/** The program and arguments that open the login script in its own console. Both programs by full path:
+ *  `start "" powershell.exe` would look in the current folder first, and that is wherever 萤火 was launched from. */
+function loginLaunch(file) {
+  const powershell = path.join(SYS32, 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  return [cmdExe(), ['/d', '/s', '/c', `start "" "${powershell}" -NoProfile -ExecutionPolicy Bypass -File "${file}"`]];
 }
 
 /** The login window's script: UTF-8 with a BOM (what Windows PowerShell 5.1 needs), every value a
@@ -368,20 +439,19 @@ function test(sender, spec) {
 
 /* ───────────── IPC ───────────── */
 
-/** Only the app's own page may call the model / skills / browser handlers. */
-const APP_URL = require('node:url').pathToFileURL(path.join(__dirname, '..', '..', 'dist', 'index.html')).href;
-function fromApp(e) {
-  const url = e && e.senderFrame && e.senderFrame.url;
-  return typeof url === 'string' && url.split('#')[0] === APP_URL;
-}
+/** Only the app's own page may call the model / skills / browser handlers. main.cjs knows which window and
+ *  frame that is (register gets its check); until then nothing is. */
+let isAppSender = () => false;
 function handle(channel, fn) {
   ipcMain.handle(channel, (e, ...args) => {
-    if (!fromApp(e)) throw new Error('拒绝：调用不是来自萤火页面');
+    if (!isAppSender(e)) throw new Error('拒绝：调用不是来自萤火页面');
     return fn(e, ...args);
   });
 }
 
-function register() {
+/** register({ isAppSender(event) → boolean }) */
+function register(host) {
+  if (host && typeof host.isAppSender === 'function') isAppSender = host.isAppSender;
   // The bridge the browser MCP server calls back to (127.0.0.1, random port and token).
   browser.startBridge().catch(() => {});
   handle('browser:open', () => browser.open());
@@ -449,4 +519,4 @@ function stopAll() {
   streams.clear();
 }
 
-module.exports = { register, stopAll };
+module.exports = { register, stopAll, _internals: { exeFor, detect, cleanCustom, loginLaunch } };

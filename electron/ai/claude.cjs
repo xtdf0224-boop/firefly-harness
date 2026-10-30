@@ -19,6 +19,8 @@ function tmpFile(prefix, content) {
  */
 function runClaude(spec, emit) {
   const sysFile = spec.system ? tmpFile('sys', spec.system) : null;
+  // --resume of a session Claude Code no longer has (cleaned up after 30 days, ~/.claude cleared): the caller starts a new one.
+  const sessionGone = (text) => !!spec.sessionId && /No conversation found/i.test(text);
   // -p skips the workspace-trust dialog: never load a project's own .claude settings (hooks!) or
   // .mcp.json from a folder that may be untrusted. Only the user's settings and our MCP server apply.
   const args = ['-p', '--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose', '--include-partial-messages',
@@ -148,7 +150,9 @@ function runClaude(spec, emit) {
           const queued = typeof ev.queued_turn_count === 'number' ? ev.queued_turn_count : Math.max(0, sentTurns - results);
           clearTimeout(settle);
           if (ev.is_error && !interrupted) {
-            finish({ type: 'error', message: text || ev.subtype || 'Claude Code 出错', code: ev.subtype || 'CLI_ERROR', sessionId });
+            // A failed result often has no text: the reason is in `errors` (「No conversation found with session ID …」).
+            const reason = text || (Array.isArray(ev.errors) ? ev.errors.map((e) => (typeof e === 'string' ? e : (e && e.message) || JSON.stringify(e))).join('\n') : '');
+            finish({ type: 'error', message: reason || ev.subtype || 'Claude Code 出错', code: sessionGone(reason) || sessionGone(stderr) ? 'SESSION_LOST' : ev.subtype || 'CLI_ERROR', sessionId });
           } else if (queued === 0 || interrupted) {
             finish({ type: 'done', text: lastTurnText, stopReason: interrupted ? 'interrupted' : ev.subtype, sessionId, costUsd: ev.total_cost_usd });
           } else {
@@ -168,7 +172,7 @@ function runClaude(spec, emit) {
     if (finished) return;
     if (interrupted) { finish({ type: 'done', text: lastTurnText || turnText, stopReason: 'interrupted', sessionId }); return; }
     const tail = stderr.trim().split(/\r?\n/).slice(-6).join('\n');
-    finish({ type: 'error', message: tail ? `Claude Code 退出（${code}）：${tail}` : `Claude Code 意外退出（${code}）`, code: `EXIT_${code}`, sessionId });
+    finish({ type: 'error', message: tail ? `Claude Code 退出（${code}）：${tail}` : `Claude Code 意外退出（${code}）`, code: sessionGone(stderr) ? 'SESSION_LOST' : `EXIT_${code}`, sessionId });
   });
 
   const send = (text) => {

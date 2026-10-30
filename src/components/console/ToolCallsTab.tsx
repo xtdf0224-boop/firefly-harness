@@ -52,7 +52,7 @@ export function ToolCallsTab({ runId }: { runId?: string }) {
     [calls, filter, q, agents],
   );
 
-  const scroll = useFollowScroll<HTMLDivElement>(visible.length);
+  const scroll = useFollowScroll<HTMLDivElement>(`${visible.length}:${visible[visible.length - 1]?.id ?? ''}`);
   const spoken = useSpokenResult(`${filter}|${q}`, () => (
     visible.length === 0 ? '没有符合条件的调用'
       : filter === 'all' && !q ? `显示全部 ${counts.all} 次调用` : `显示 ${visible.length} / ${counts.all} 次调用`

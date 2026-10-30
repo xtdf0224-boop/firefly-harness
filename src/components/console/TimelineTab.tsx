@@ -85,7 +85,9 @@ export function TimelineTab({ runId }: { runId?: string }) {
     [events, scope, runId, kind],
   );
   const rows = useMemo(() => withDays(visible), [visible]);
-  const scroll = useFollowScroll<HTMLDivElement>(rows.length);
+  // The event log is capped, so its length stops changing while rows keep arriving: key on the last row.
+  const last = rows[rows.length - 1];
+  const scroll = useFollowScroll<HTMLDivElement>(`${rows.length}:${last ? (last.kind === 'day' ? last.key : last.event.id) : ''}`);
   const filtering = kind !== 'all';
   const spoken = useSpokenResult(`${scope}|${kind}`, () => (visible.length === 0 ? '没有符合条件的事件' : `${visible.length} 条事件`));
 

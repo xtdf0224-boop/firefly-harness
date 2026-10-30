@@ -26,7 +26,7 @@ export function TerminalTab({ runId }: { runId?: string }) {
   });
 
   const [showTime, setShowTime] = useRemembered('term.time', false);
-  const scroll = useFollowScroll<HTMLDivElement>(lines.length);
+  const scroll = useFollowScroll<HTMLDivElement>(lines[lines.length - 1]?.id);
   const text = useMemo(() => lines.map((l) => l.text).join('\n'), [lines]);
 
   return (

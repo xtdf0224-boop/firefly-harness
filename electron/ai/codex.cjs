@@ -20,8 +20,12 @@ function unwrapShell(command) {
   return inner;
 }
 
+/** How long Codex may keep saying 「Reconnecting…」 with nothing else happening before we give up on it. */
+const RECONNECT_LIMIT_MS = 4 * 60 * 1000;
+
 /**
- * spec: { exe, cwd, prompt, system, sessionId?, model?, sandbox: 'read-only'|'workspace-write'|'danger-full-access', webSearch }
+ * spec: { exe, cwd, prompt, system, sessionId?, model?, sandbox: 'read-only'|'workspace-write'|'danger-full-access', webSearch,
+ *         reconnectLimitMs? }
  */
 function runCodex(spec, emit) {
   const common = ['--json', '--skip-git-repo-check', '-c', 'approval_policy="never"'];
@@ -43,7 +47,12 @@ function runCodex(spec, emit) {
   let sessionId = spec.sessionId || null;
   let stderr = '';
   let text = '';
-  let failure = '';
+  let failure = ''; // from turn.failed: the turn did not finish
+  let lastError = ''; // the latest top-level error event: only the reason if the process then exits with an error
+  let completed = false;
+  let reconnectSince = 0; // when the current run of 「Reconnecting…」 notices began
+  let lastNotice = 0; // when the latest 「Reconnecting…」 notice came
+  let gaveUp = '';
   let sandboxHint = false;
   let finished = false;
   let stopped = false;
@@ -59,16 +68,41 @@ function runCodex(spec, emit) {
       const ev = parseJson(line);
       if (!ev) return;
       if (ev.type === 'thread.started' && ev.thread_id) { sessionId = ev.thread_id; emit({ type: 'session', sessionId }); return; }
-      if (ev.type === 'turn.completed' && ev.usage) {
-        const u = ev.usage;
-        emit({ type: 'usage', total: true, input: u.input_tokens || 0, output: (u.output_tokens || 0) + (u.reasoning_output_tokens || 0), cached: u.cached_input_tokens || 0 });
+      if (ev.type === 'turn.completed') {
+        completed = true;
+        if (ev.usage) {
+          const u = ev.usage;
+          emit({ type: 'usage', total: true, input: u.input_tokens || 0, output: (u.output_tokens || 0) + (u.reasoning_output_tokens || 0), cached: u.cached_input_tokens || 0 });
+        }
         return;
       }
-      if (ev.type === 'turn.failed' || ev.type === 'error') {
+      if (ev.type === 'turn.failed') {
         failure = (ev.error && ev.error.message) || ev.message || 'Codex 出错';
         emit({ type: 'notice', level: 'error', text: failure });
         return;
       }
+      if (ev.type === 'error') {
+        // A top-level error is usually Codex reporting a dropped stream it is already retrying: a
+        // notice, not the end. Only turn.failed (or a non-zero exit) fails the turn.
+        lastError = ev.message || (ev.error && ev.error.message) || 'Codex 出错';
+        emit({ type: 'notice', level: 'warn', text: lastError });
+        // With no network Codex retries for ever: stop after a while, and say why.
+        // A recovered stream prints nothing, so notices far apart are separate streaks: a later blip must not inherit
+        // minutes of healthy silence. An offline Codex retries every 15–35 s and so stays one streak.
+        const now = Date.now();
+        const limit = spec.reconnectLimitMs || RECONNECT_LIMIT_MS;
+        if (!/^Reconnecting/i.test(lastError)) reconnectSince = 0;
+        else {
+          if (!reconnectSince || now - lastNotice > limit / 2) reconnectSince = now;
+          lastNotice = now;
+        }
+        if (reconnectSince && !gaveUp && now - reconnectSince > limit) {
+          gaveUp = 'Codex 一直连不上服务（网络不通，或代理没有生效），已停止等待。请检查网络或代理后重试。';
+          killTree(child);
+        }
+        return;
+      }
+      reconnectSince = 0; // anything else means the connection is back
       if (!/^item\./.test(ev.type)) return;
       const it = ev.item || {};
       const end = ev.type === 'item.completed';
@@ -124,9 +158,14 @@ function runCodex(spec, emit) {
   child.on('error', (e) => finish({ type: 'error', message: `无法启动 Codex：${e.message}`, code: 'SPAWN' }));
   child.on('close', (code) => {
     if (stopped) { finish({ type: 'done', text, stopReason: 'interrupted', sessionId }); return; }
-    if (code === 0 && !failure) { finish({ type: 'done', text, sessionId }); return; }
+    if (gaveUp) { finish({ type: 'error', message: gaveUp, code: 'NETWORK', sessionId }); return; }
+    // Exit 0 is a finished turn, even if a stream dropped and reconnected on the way.
+    if (code === 0 && (completed || !failure)) { finish({ type: 'done', text, sessionId }); return; }
     const tail = stderr.trim().split(/\r?\n/).filter((l) => !/^\s*$/.test(l)).slice(-6).join('\n');
-    finish({ type: 'error', message: failure || (tail ? `Codex 退出（${code}）：${tail}` : `Codex 意外退出（${code}）`), code: `EXIT_${code}`, sessionId });
+    const reason = failure || lastError;
+    // Resuming a thread Codex no longer has (its folder was cleaned, or it is a new install): the caller starts a new one.
+    const lost = !!spec.sessionId && /no rollout found/i.test(`${reason}\n${stderr}`);
+    finish({ type: 'error', message: reason || (tail ? `Codex 退出（${code}）：${tail}` : `Codex 意外退出（${code}）`), code: lost ? 'SESSION_LOST' : `EXIT_${code}`, sessionId });
   });
   child.stdin.end(input, 'utf8');
 

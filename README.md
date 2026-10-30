@@ -64,7 +64,7 @@
 | MiniMax | MiniMax Code（MiniMax 账号登录），或 Claude Code + MiniMax 兼容端点 | OpenAI 兼容接口（国内 / 国际） |
 | 豆包 | Claude Code + 火山方舟 Coding Plan 端点 | 火山方舟接口（按量 / Coding Plan） |
 
-- **命令行方式**：萤火在你选的工作文件夹里驱动官方命令行 Agent（无头模式）。登录由那个工具自己完成：点「登录」会打开一个终端窗口，你在里面按提示登录，萤火不经手账号密码。Claude Code、Kimi Code、Qwen Code、MiniMax Code 的每一次写文件、执行命令都会回到萤火的「待确认操作」；Codex 和 DeepSeek Harness 的无头模式不能逐项确认，按沙箱或它自己的权限设置执行（新建时会提醒）。
+- **命令行方式**：萤火在你选的工作文件夹里驱动官方命令行 Agent（无头模式）。登录由那个工具自己完成：点「登录」会打开一个终端窗口，你在里面按提示登录，萤火不经手账号密码。Claude Code、Kimi Code、Qwen Code、MiniMax Code 的每一次写文件、执行命令都会回到萤火的「待确认操作」；Codex 和 DeepSeek Harness 的无头模式不能逐项确认，按沙箱或它自己的权限设置执行（新建时会提醒）。命令从 PATH 里找；DeepSeek Harness 的 `dsh` 在它桌面版的安装文件夹里，装在哪个盘都能找到。找不到时在「模型接入 › 高级 › 命令路径」里填（DeepSeek Harness 填安装文件夹即可）。
 - **API 方式**：直接调用接口，只思考和写作，不读写文件、不执行命令。工作任务里，检索 / 编码 / 审查 Agent 按各自分工轮流发言。
 - **「Claude Code + 兼容端点」**：用这家的 API Key 驱动 Claude Code（各厂商官方文档提供的 Anthropic 兼容端点）。它的会话和设置与你自己的 Claude Code 分开保存；模型有 1M 上下文时会按厂商建议加上 `[1m]`，并把自动压缩窗口设为 1M。
 - **密钥安全**：API 密钥由系统加密（Windows DPAPI，Electron safeStorage）后保存在本机应用数据目录，不进浏览器存储，界面上只显示末四位，只会发给你选的服务商。

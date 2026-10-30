@@ -300,7 +300,7 @@ export function readiness(p: ProviderInfo, cfg: ProviderConfig, auth: 'api' | 'c
   const d = DRIVERS[cfg.driver];
   if (!p.drivers.includes(cfg.driver)) return { ready: false, reason: '请选择命令行工具' };
   if (!cfg.cli) return { ready: false, reason: `还没有检测 ${d.label}` };
-  if (!cfg.cli.found) return { ready: false, reason: `没有找到 ${d.bin} 命令` };
+  if (!cfg.cli.found) return { ready: false, reason: cfg.cli.path ? `${d.label} 找到了，但运行不起来（见上方说明）` : `没有找到 ${d.bin} 命令` };
   if (d.auth === 'key' && !cfg.keyHint) return { ready: false, reason: `${d.label} 需要这家的 API Key` };
   if (cfg.driver === 'claude-compat' && !regionOf(p, cfg).compatUrl) {
     const alt = p.regions.find((r) => r.compatUrl);

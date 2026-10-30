@@ -18,7 +18,9 @@ const NEAR_BOTTOM = 32;
 /** Sticky-bottom scrolling for a log-like list.
  *  Follows new content while the reader is at the bottom; once they scroll up it stops, and
  *  `following` turns false so the UI can offer a jump back. `changeKey` is anything that changes
- *  when content is added (usually the list length). The scroller element must always be rendered. */
+ *  when content is added: the id of the last row for a list that is capped (old rows drop off the top
+ *  while new ones arrive, so its length stays put), the length otherwise. The scroller element must
+ *  always be rendered. */
 export function useFollowScroll<T extends HTMLElement = HTMLDivElement>(changeKey: unknown) {
   const ref = useRef<T>(null);
   const pinned = useRef(true);
@@ -36,6 +38,13 @@ export function useFollowScroll<T extends HTMLElement = HTMLDivElement>(changeKe
     const el = ref.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
   }, [changeKey]);
+
+  // Chromium's scroll anchoring would take the rows dropped off the top out of scrollTop and pull a
+  // pinned list off the bottom; it only helps a reader who has scrolled up.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el) el.style.overflowAnchor = following ? 'none' : '';
+  }, [following]);
 
   // Stay pinned when the console is resized.
   useEffect(() => {

@@ -20,6 +20,15 @@ export function initialModels(): ModelState {
   };
 }
 
+/** The message a connection test shows while it is running. */
+export const TESTING = '测试中…';
+
+/** A path typed or pasted into 命令路径: surrounding blanks and one pair of quotes (「复制为路径」 adds them) are dropped. */
+export function cleanPath(raw: string) {
+  const t = raw.trim();
+  return (t.length >= 2 && (t[0] === '"' || t[0] === "'") && t.endsWith(t[0]) ? t.slice(1, -1) : t).trim();
+}
+
 /** Merge saved (non-secret) settings over the defaults; drop anything that no longer exists. */
 export function restoreModels(saved: Partial<ModelState> | undefined): ModelState {
   const base = initialModels();
@@ -28,6 +37,8 @@ export function restoreModels(saved: Partial<ModelState> | undefined): ModelStat
     const old = saved.providers[p.id];
     if (!old) continue;
     const merged = { ...base.providers[p.id], ...old, id: p.id, keyHint: undefined };
+    // A test that was still running when the app closed will never finish.
+    if (merged.test?.message === TESTING) merged.test = undefined;
     if (!p.drivers.includes(merged.driver)) merged.driver = p.drivers[0];
     if (!p.regions.some((r) => r.id === merged.region)) merged.region = p.regions[0].id;
     base.providers[p.id] = merged;
@@ -127,9 +138,10 @@ export const modelActions = {
     const c = store.get().models.providers[id];
     const ready = readiness(p, c, auth);
     if (!ready.ready) { feedback('warning', '还不能测试', ready.reason); return; }
-    patch(id, (x) => { x.test = { ok: false, at: Date.now(), ms: 0, message: '测试中…', auth, driver: auth === 'cli' ? c.driver : undefined }; });
+    patch(id, (x) => { x.test = { ok: false, at: Date.now(), ms: 0, message: TESTING, auth, driver: auth === 'cli' ? c.driver : undefined }; });
     const spec = testSpec(id, auth);
-    const r = await desktop.test(spec);
+    let r: Awaited<ReturnType<typeof desktop.test>>;
+    try { r = await desktop.test(spec); } catch (e) { r = { ok: false, ms: 0, error: e instanceof Error ? e.message : String(e) }; }
     patch(id, (x) => {
       x.test = r.ok
         ? { ok: true, at: Date.now(), ms: r.ms, message: `回复「${r.text || '（空）'}」${r.model ? ` · ${r.model}` : ''}`, auth, driver: auth === 'cli' ? c.driver : undefined }
@@ -149,7 +161,7 @@ async function detectCli(id: ProviderId, quiet: boolean) {
   if (r.found && c.driver === 'codex' && !store.get().models.live?.codex) void refreshLiveModels();
   if (!quiet) {
     const d = DRIVERS[c.driver];
-    if (!r.found) feedback('warning', `没有找到 ${d.label}`, r.detail);
+    if (!r.found) feedback('warning', r.path ? `${d.label} 运行不起来` : `没有找到 ${d.label}`, r.detail);
     else feedback(r.login === 'no' ? 'warning' : 'success', `${d.label} ${r.version || ''}`.trim(),
       r.login === 'yes' ? `已登录${r.account ? ` · ${r.account}` : ''}` : r.login === 'no' ? '还没有登录' : r.login === 'n/a' ? '使用这里保存的 API Key' : '已找到');
   }
