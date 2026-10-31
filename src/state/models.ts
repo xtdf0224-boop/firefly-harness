@@ -2,7 +2,7 @@
    process, CLI detection, login and connection tests. */
 import { desktop, type StartSpec } from '../lib/desktop';
 import {
-  DRIVERS, PROVIDERS, PROVIDER_BY_ID, apiBaseUrl, contextOf, ctxLabel, defaultProviderConfig, engineLabel, modelInfo, readiness, regionOf, shortModelNote, tidyModelLabel,
+  DRIVERS, PROVIDERS, PROVIDER_BY_ID, apiBaseUrl, contextOf, ctxLabel, defaultProviderConfig, engineLabel, modelInfo, modelSeesImages, readiness, regionOf, shortModelNote, tidyModelLabel,
 } from '../lib/providers';
 import { EFFORT_HINT, EFFORT_LABEL, effortLevels, type Effort, type LiveModel } from '../lib/effort';
 import type { AgentEngine, AuthMode, DriverId, ModelState, ProviderConfig, ProviderId, TaskEngine } from '../lib/types';
@@ -305,4 +305,94 @@ export function engineFromChoice(choice: EngineChoice, extra: Pick<TaskEngine, '
   const effort = extra.effort;
   const label = `${engineLabel(p, choice.auth, choice.driver, model)}${effort ? ` · ${EFFORT_LABEL[effort]}强度` : ''}`;
   return { kind: 'live', provider: choice.provider, auth: choice.auth, driver: choice.driver, model, label, cwd: extra.cwd, access: extra.access, effort, browser: extra.browser || undefined };
+}
+
+/* ───────────── 桌宠 (docs/PET.md §5) ───────────── */
+
+/** A model the 桌宠 can be pointed at, as the 设置 menu lists it (`key` + `model` = AgentEngine). */
+export interface PetModelOption { key: string; model: string; label: string }
+
+/** How cheap a model is to run, for choosing one automatically: 0 = fast / small, 3 = flagship. */
+export function petThrift(note: string | undefined, id: string): number {
+  // The catalog's own word wins: "minimax-m3" is a flagship, whatever its id contains.
+  if (/旗舰/.test(note ?? '')) return 3;
+  const text = `${note ?? ''} ${id}`.toLowerCase();
+  // `mini` only as a word of its own (gpt-5-mini), not inside minimax.
+  if (/快速|flash|haiku|luna|lite|turbo|(^|[^a-z])mini($|[^a-z])|highspeed/.test(text)) return 0;
+  if (/均衡|plus|sol/.test(text)) return 1;
+  if (/编程|code/.test(text)) return 2;
+  return 3;
+}
+
+/** API models that take images, from every vendor with a saved key. */
+export function petVisionOptions(m: ModelState): PetModelOption[] {
+  const out: PetModelOption[] = [];
+  for (const c of engineChoices(m)) {
+    if (c.auth !== 'api') continue;
+    const p = PROVIDER_BY_ID[c.provider];
+    for (const x of p.models) if (modelSeesImages(p, x.id)) out.push({ key: c.key, model: x.id, label: engineLabel(p, 'api', undefined, x.id) });
+  }
+  return out;
+}
+
+/** Claude Code / Codex ways that are ready (found, logged in): the only ones that can search the web for her. */
+export function petWebOptions(m: ModelState): PetModelOption[] {
+  const out: PetModelOption[] = [];
+  for (const c of engineChoices(m)) {
+    if (c.auth !== 'cli' || (c.driver !== 'claude-code' && c.driver !== 'codex')) continue;
+    const p = PROVIDER_BY_ID[c.provider];
+    for (const x of modelOptions(m, c)) out.push({ key: c.key, model: x.id, label: engineLabel(p, 'cli', c.driver, x.id) });
+  }
+  return out;
+}
+
+/** Cheapest first; among equals the vendor chosen as default, then catalog order. */
+function petPick(m: ModelState, options: PetModelOption[]): PetModelOption | undefined {
+  const rank = (o: PetModelOption) => {
+    const choice = engineChoices(m).find((c) => c.key === o.key);
+    const p = choice ? PROVIDER_BY_ID[choice.provider] : undefined;
+    const info = p ? modelInfo(p, o.model) : undefined;
+    return petThrift(info?.note, o.model) * 10 + (choice && m.defaultEngine === choice.provider ? 0 : 1);
+  };
+  return options.map((o, i) => ({ o, i, r: rank(o) })).sort((a, b) => a.r - b.r || a.i - b.i)[0]?.o;
+}
+
+function petEngineFor(m: ModelState, o: PetModelOption, cwd?: string): TaskEngine | undefined {
+  const choice = engineChoices(m).find((c) => c.key === o.key);
+  return choice ? engineFromChoice(choice, { model: o.model, cwd, access: 'read' }) : undefined;
+}
+
+/** The model that looks at pictures: the one chosen in 桌宠 settings if it is still connected, else the cheapest. */
+export function petVisionEngine(m: ModelState, pref?: AgentEngine): TaskEngine | undefined {
+  const options = petVisionOptions(m);
+  const chosen = (pref && options.find((o) => o.key === pref.key && o.model === pref.model)) || petPick(m, options);
+  return chosen ? petEngineFor(m, chosen) : undefined;
+}
+
+/** The command-line model that answers questions needing the web; `cwd` is the scratch folder it runs in. */
+export function petWebEngine(m: ModelState, pref?: AgentEngine, cwd?: string): TaskEngine | undefined {
+  const options = petWebOptions(m);
+  let chosen = pref && options.find((o) => o.key === pref.key && o.model === pref.model);
+  if (!chosen) {
+    // Auto: each connected way with the model set on 模型接入 (its own default when none), Claude Code before Codex.
+    const own = engineChoices(m)
+      .filter((c) => c.auth === 'cli' && (c.driver === 'claude-code' || c.driver === 'codex'))
+      .sort((a, b) => (a.driver === b.driver ? 0 : a.driver === 'claude-code' ? -1 : 1))[0];
+    chosen = own ? { key: own.key, model: own.model, label: own.label } : undefined;
+  }
+  return chosen ? petEngineFor(m, chosen, cwd) : undefined;
+}
+
+/** A model for plain talk (no picture): the vision pick if there is one, else any API model, else a CLI one. */
+export function petChatEngine(m: ModelState, o: { vision?: AgentEngine; web?: AgentEngine; cwd?: string }): TaskEngine | undefined {
+  const vision = petVisionEngine(m, o.vision);
+  if (vision) return vision;
+  const api: PetModelOption[] = [];
+  for (const c of engineChoices(m)) {
+    if (c.auth !== 'api') continue;
+    const p = PROVIDER_BY_ID[c.provider];
+    api.push({ key: c.key, model: c.model, label: engineLabel(p, 'api', undefined, c.model) });
+  }
+  const chosen = petPick(m, api.filter((x) => x.model));
+  return (chosen && petEngineFor(m, chosen)) || petWebEngine(m, o.web, o.cwd);
 }

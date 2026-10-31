@@ -1,6 +1,10 @@
 /* The desktop bridge (electron/preload.cjs). In the browser dev build it is absent and every model
    feature says so instead of pretending. Keys go in through saveKey and never come back. */
 import type { CliStatus, DriverId, ProviderId } from './types';
+import type { PetBridge } from '../pet/contracts';
+
+/** One part of an API message: text, or an image (a screenshot for the 桌宠) as base64. */
+export type ContentPart = { type: 'text'; text: string } | { type: 'image'; mime: 'image/jpeg' | 'image/png'; data: string };
 
 export type StreamEvent =
   | { id: string; type: 'session'; sessionId: string }
@@ -25,7 +29,8 @@ export interface StartSpec {
   baseUrl?: string;
   model?: string;
   system?: string;
-  messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** Text, or (API drivers only, user turns only) text and images. */
+  messages?: Array<{ role: 'user' | 'assistant'; content: string | ContentPart[] }>;
   maxTokens?: number;
   temperature?: number;
   /** Reasoning fields for the API body (validated by the desktop side). */
@@ -54,7 +59,11 @@ export interface StartSpec {
 }
 
 /** What the tray menu or a notification asks the page to do. */
-export type DesktopCommand = { type: 'new' } | { type: 'close-to-tray'; value: boolean } | { type: 'approvals' } | { type: 'open-task'; taskId: string };
+export type DesktopCommand = { type: 'new' } | { type: 'close-to-tray'; value: boolean } | { type: 'approvals' } | { type: 'open-task'; taskId: string }
+  /** Tray / pet menu: show or hide the 桌宠, open its settings, start or stop 实时陪玩. */
+  | { type: 'pet-toggle' } | { type: 'pet-settings' } | { type: 'pet-realtime'; on: boolean }
+  /** Pet menu on a program: let her watch it (a game) or never look at it. */
+  | { type: 'pet-watch'; exe: string; allow: boolean };
 
 export interface DesktopBridge {
   version: number;
@@ -80,6 +89,8 @@ export interface DesktopBridge {
     onCommand(fn: (cmd: DesktopCommand) => void): () => void;
   };
   browser?: { open(): Promise<boolean>; clear(): Promise<boolean> };
+  /** 桌宠 (docs/PET.md). */
+  pet?: PetBridge;
   skills?: {
     list(): Promise<{ root: string; skills: import('./types').SkillInfo[]; error?: string }>;
     import(): Promise<{ ok: true; name: string } | { ok: false; error?: string; canceled?: boolean; conflict?: string; token?: string; name?: undefined }>;

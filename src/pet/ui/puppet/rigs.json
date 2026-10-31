@@ -1,0 +1,104 @@
+{
+ "firefly": {
+  "version": 1,
+  "size": 640,
+  "foot": 612,
+  "hip": 500,
+  "chest": 330,
+  "pivot": [
+   293,
+   332
+  ],
+  "neck": [
+   380,
+   290
+  ],
+  "amp": {
+   "breath": 6.0,
+   "tilt": 2.0,
+   "hair": 11.0,
+   "accent": 6.0
+  },
+  "mouth": {
+   "kind": "open",
+   "box": [
+    285,
+    278,
+    304,
+    293
+   ]
+  },
+  "poses": {
+   "idle": {
+    "weights": "w-idle",
+    "blink": "blink",
+    "talk": "talk"
+   },
+   "think": {
+    "weights": "w-think",
+    "blink": "think_blink"
+   },
+   "watch": {
+    "weights": "w-watch",
+    "blink": "watch_blink"
+   },
+   "happy": {
+    "weights": "w-happy"
+   },
+   "sleep": {
+    "weights": "w-sleep"
+   }
+  }
+ },
+ "sam": {
+  "version": 1,
+  "size": 640,
+  "foot": 612,
+  "hip": 470,
+  "chest": 300,
+  "pivot": [
+   320,
+   300
+  ],
+  "neck": [
+   330,
+   250
+  ],
+  "amp": {
+   "breath": 5.0,
+   "tilt": 1.0,
+   "hair": 0.0,
+   "accent": 3.5
+  },
+  "mouth": {
+   "kind": "glow",
+   "box": [
+    288,
+    230,
+    403,
+    308
+   ]
+  },
+  "poses": {
+   "idle": {
+    "weights": "w-idle",
+    "blink": "blink",
+    "talk": "talk"
+   },
+   "think": {
+    "weights": "w-think",
+    "blink": "think_blink"
+   },
+   "watch": {
+    "weights": "w-watch",
+    "blink": "watch_blink"
+   },
+   "happy": {
+    "weights": "w-happy"
+   },
+   "sleep": {
+    "weights": "w-sleep"
+   }
+  }
+ }
+}

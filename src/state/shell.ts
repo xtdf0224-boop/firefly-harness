@@ -2,7 +2,9 @@
    window into the tray when 关闭窗口时缩小到托盘 is on, shows a notification for what needs the user
    (an approval, a finished or failed run) while the window is hidden or in the background, and sends
    back what the tray menu or a clicked notification asks for. */
+import { focusPetSettings } from '../components/views/settings/PetSettings';
 import { desktop, type DesktopCommand } from '../lib/desktop';
+import { petRealtime } from '../pet/brain';
 import type { Toast } from '../lib/types';
 import { actions } from './actions';
 import { store } from './store';
@@ -18,12 +20,26 @@ function notification(t: Toast): { title: string; body?: string; command?: Deskt
   return undefined;
 }
 
+/** The pet's right-click menu: let her look at a program (a game) or keep to chat for it. */
+function petWatch(exe: string, allow: boolean) {
+  const name = exe.trim().toLowerCase();
+  if (!name) return;
+  const p = store.get().settings.pet;
+  const without = (list: string[]) => list.filter((x) => x !== name);
+  const added = (list: string[]) => (list.includes(name) ? list : [...list, name]);
+  actions.setPet(allow ? { gameAllow: added(p.gameAllow), gameDeny: without(p.gameDeny) } : { gameDeny: added(p.gameDeny), gameAllow: without(p.gameAllow) });
+}
+
 function run(cmd: DesktopCommand) {
   switch (cmd.type) {
     case 'new': actions.navigate('new'); actions.requestFocus('composer'); return;
     case 'close-to-tray': actions.setSetting('closeToTray', !!cmd.value); return;
     case 'approvals': actions.run({ type: 'show-approvals' }); return;
     case 'open-task': if (store.get().tasks[cmd.taskId]) actions.openTask(cmd.taskId); return;
+    case 'pet-toggle': actions.setPet({ enabled: !store.get().settings.pet.enabled }); return;
+    case 'pet-settings': actions.navigate('settings'); focusPetSettings(); return;
+    case 'pet-realtime': petRealtime(cmd.on); return;
+    case 'pet-watch': petWatch(cmd.exe, cmd.allow); return;
     default: return;
   }
 }

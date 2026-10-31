@@ -1,0 +1,94 @@
+/* 设置 › 桌宠 (src/components/views/settings/PetSettings.tsx). Uses the shared settings-* rows; this adds
+   the panel's own pieces: grouped blocks, name lists, the voice-service keys and the privacy note. */
+.callout--info { --c: var(--tone-info); --c-soft: var(--tone-info-soft); }
+
+.pet-set__fields { margin: 0; padding: 0; border: 0; min-width: 0; }
+.pet-set__fields:disabled { opacity: 0.55; }
+.pet-set__note { margin-bottom: var(--sp-3); }
+
+/* A titled block of settings. */
+.pet-set { display: flex; flex-direction: column; gap: var(--sp-3); }
+.pet-set__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.pet-set__title { display: flex; align-items: center; gap: var(--sp-2); margin: 0; font-size: var(--fs-md); font-weight: var(--fw-semibold); color: var(--text); }
+.pet-set__title svg { color: var(--mint); flex: none; }
+:root[data-mode="sam"] .pet-set__title svg { color: var(--firefly); }
+.pet-set__wide { flex: 1 1 100%; width: 100%; }
+.pet-set .settings-row__control.pet-set__wide { flex-basis: 100%; }
+
+.pet-set__hint { margin: 0; font-size: var(--fs-xs); line-height: 1.6; color: var(--text-3); }
+.pet-set__ok { margin: 0; font-size: var(--fs-xs); color: var(--tone-success); }
+.pet-set__err { margin: 4px 0 0; font-size: var(--fs-xs); line-height: 1.55; color: var(--tone-danger); }
+.pet-set__warn { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; font-size: var(--fs-xs); color: var(--tone-warning); }
+.pet-set__warn svg { flex: none; }
+.pet-set__empty { margin: 0; font-size: var(--fs-xs); color: var(--text-3); }
+
+/* A text field saved when it loses focus. */
+.pet-set__commit { display: flex; flex-direction: column; align-items: flex-start; }
+.pet-set__with-unit { display: inline-flex; align-items: center; gap: var(--sp-2); max-width: 100%; }
+.pet-set__unit { font-size: var(--fs-sm); color: var(--text-3); white-space: nowrap; }
+.pet-set__num { width: 96px; text-align: right; font-variant-numeric: tabular-nums; }
+.pet-set__key { width: 160px; }
+.pet-set__ws { width: min(300px, 100%); }
+.pet-set__pick { display: flex; flex-direction: column; align-items: flex-start; width: 100%; }
+
+/* Lists of programs. */
+.pet-set__lists { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.pet-set__listbox {
+  display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; padding: var(--sp-3);
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-sunken);
+}
+.pet-set__listname { margin: 0; font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text); }
+.pet-set__add { display: flex; gap: var(--sp-2); align-items: center; }
+.pet-set__add .input { flex: 1; min-width: 0; height: 32px; }
+.pet-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.pet-tag {
+  display: inline-flex; align-items: center; gap: 2px; max-width: 100%; height: 26px; padding: 0 4px 0 10px;
+  border: 1px solid var(--line-2); border-radius: 13px; background: var(--surface-raised);
+  font: var(--fs-xs) var(--font-mono); color: var(--text);
+}
+.pet-tag span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pet-tag button {
+  display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; padding: 0;
+  border: 0; border-radius: 50%; background: none; color: var(--text-3); cursor: pointer;
+}
+.pet-tag button:hover { color: var(--text); background: var(--surface-active); }
+
+/* The voice services. */
+.pet-set__box {
+  display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3);
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-sunken);
+}
+.pet-set__boxtitle { margin: 0; font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text); }
+.pet-set__keys { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+/* Where the words she speaks are sent (under the 备用声音 switch). */
+.pet-set__route {
+  display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-sunken);
+}
+.pet-set__route-title { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text); }
+.pet-set__route-title svg { flex: none; color: var(--mint); }
+.pet-set__route-text { margin: 0; font-size: var(--fs-xs); line-height: 1.65; color: var(--text-2); }
+.pet-set__route ul { margin: 0; padding-left: 1.2em; font-size: var(--fs-xs); line-height: 1.7; color: var(--text-2); }
+.pet-set__route strong { color: var(--text); font-weight: var(--fw-semibold); }
+.pet-set__route .pet-set__warn { align-items: flex-start; margin: 0; line-height: 1.6; }
+.pet-set__route .pet-set__warn svg { margin-top: 3px; }
+.pet-set__voicebar { display: flex; align-items: center; gap: var(--sp-2); width: 100%; }
+.pet-set__grow { flex: 1; min-width: 0; }
+
+/* What she sees and where it goes. */
+.pet-set__privacy {
+  padding: var(--sp-3) var(--sp-4); border: 1px solid var(--mint-line); border-radius: var(--r-md); background: var(--mint-soft);
+}
+.pet-set__privacy-title { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text); }
+.pet-set__privacy-title svg { color: var(--mint); }
+.pet-set__privacy ul { margin: 0; padding-left: 1.2em; font-size: var(--fs-xs); line-height: 1.7; color: var(--text-2); }
+.pet-set__privacy strong { color: var(--text); font-weight: var(--fw-semibold); }
+
+/* The 实时陪玩 key line. */
+.pet-set__qwen {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-sunken); font-size: var(--fs-sm); color: var(--text-2);
+}
+.pet-set__qwen svg { flex: none; color: var(--mint); }
+.pet-set__qwen.is-missing { border-color: rgb(242 200 121 / 0.4); }
+.pet-set__qwen.is-missing svg { color: var(--tone-warning); }

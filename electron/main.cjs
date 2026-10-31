@@ -8,12 +8,15 @@ const path = require('node:path');
 const { pathToFileURL, format: formatUrl } = require('node:url');
 const ai = require('./ai/index.cjs');
 const browser = require('./ai/browser.cjs');
+const pet = require('./pet/index.cjs');
 
 // One window per user: a second launch focuses the existing one.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
   process.exit(0);
 }
+// Switches the 桌宠's hidden capture page needs, set before the app is ready.
+pet.beforeReady();
 
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -53,6 +56,9 @@ function trayMenu() {
     { label: '打开萤火', click: showWindow },
     { label: '新建任务', click: () => command({ type: 'new' }) },
     { label: '打开萤火浏览器', click: () => browser.open() },
+    { type: 'separator' },
+    { label: '显示 / 隐藏桌宠', click: () => command({ type: 'pet-toggle' }, false) },
+    { label: '桌宠设置…', click: () => command({ type: 'pet-settings' }) },
     { type: 'separator' },
     { label: '关闭窗口时缩小到托盘', type: 'checkbox', checked: closeToTray, click: (item) => command({ type: 'close-to-tray', value: item.checked }, false) },
     { type: 'separator' },
@@ -153,6 +159,17 @@ function createWindow() {
   };
   win.webContents.on('will-navigate', guard);
   win.webContents.on('will-frame-navigate', (event) => { if (!event.isMainFrame) return; guard(event, event.url); });
+  // A crashed page is a blank window, and the pet's brain lives in it: load it again (the runs go on in this process),
+  // but not in a loop.
+  const self = win;
+  let crashes = [];
+  win.webContents.on('render-process-gone', (_e, details) => {
+    if (quitting || win !== self || (details && details.reason === 'clean-exit')) return;
+    const now = Date.now();
+    crashes = crashes.filter((t) => now - t < 60_000).concat(now);
+    if (crashes.length > 3) return;
+    setTimeout(() => { if (win === self && !win.isDestroyed()) win.reload(); }, 1000);
+  });
   // The close button tucks the window into the tray (when that setting is on); runs keep going.
   win.on('close', (event) => {
     if (quitting || !closeToTray || !tray) return;
@@ -163,7 +180,11 @@ function createWindow() {
       tray.displayBalloon({ title: '萤火还在托盘里', content: '任务会继续在后台运行。点托盘图标打开；右键可以退出，或在设置里改成关闭即退出。', iconType: 'info' });
     }
   });
-  win.on('closed', () => { win = null; });
+  win.on('closed', () => {
+    win = null;
+    // The pet's own windows would keep the app alive after 'window-all-closed' no longer fires.
+    if (quitting || !closeToTray) app.quit();
+  });
 }
 
 app.on('second-instance', showWindow);
@@ -172,11 +193,12 @@ app.whenReady().then(() => {
   // Windows groups notifications by this id (the installer registers the same one).
   if (process.platform === 'win32') app.setAppUserModelId('io.github.xtdf0224-boop.firefly-harness');
   ai.register({ isAppSender });
+  pet.register({ getMainWindow: () => win, showMainWindow: showWindow, sendCommandToPage: command, isAppSender });
   createTray();
   createWindow();
 });
 app.on('window-all-closed', () => { if (quitting || !closeToTray) app.quit(); });
 // Never leave a CLI agent running after the app is gone.
-app.on('before-quit', () => { quitting = true; ai.stopAll(); });
+app.on('before-quit', () => { quitting = true; ai.stopAll(); pet.stopAll(); });
 
 module.exports = { _internals: { pageUrls, appSenderCheck } };

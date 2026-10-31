@@ -1,15 +1,45 @@
 /* Everything a component can do. Each run control goes through `backend` and then gives visible
    feedback (toast + screen-reader announcement), whether it succeeded or not. */
 import type {
-  AgentEngine, AgentId, ConsoleTab, Dialog, Settings, Task, TaskEngine, TaskKind, ToolId, ToolPermission, Toast, UiCommand, ViewId, WorkspaceTab,
+  AgentEngine, AgentId, ConsoleTab, Dialog, PetSettings, Settings, Task, TaskEngine, TaskKind, ToolId, ToolPermission, Toast, UiCommand, ViewId, WorkspaceTab,
 } from '../lib/types';
 import { backend } from './backend';
 import { announce, dropToasts, pushEvent, toast as pushToast } from './engine';
 import { forgetTask, reply } from './live';
-import { syncPersonaAgent } from './seed';
+import { DEFAULT_PET, syncPersonaAgent } from './seed';
 import { store, uid } from './store';
 
 type ToastInput = Omit<Toast, 'id' | 'createdAt' | 'ttl'> & { ttl?: number };
+
+/** A change to the 桌宠 settings: `voice` and `realtime` may carry only the fields that change. Anything a
+ *  plain Partial<PetSettings> accepts is accepted here too. */
+type PetPatch = Partial<Omit<PetSettings, 'voice' | 'realtime'>> & { voice?: Partial<PetSettings['voice']>; realtime?: Partial<PetSettings['realtime']> };
+
+/** A speech model id as the services write them (eleven_v3, speech-2.8-hd). */
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+
+/** Same limits as when the settings are loaded (persist.ts), so a bad value never gets into the store. */
+function tidyPet(p: PetSettings) {
+  const num = (v: number, lo: number, hi: number, def: number) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : def);
+  p.scale = Math.round(num(p.scale, 0.6, 1.6, DEFAULT_PET.scale) * 100) / 100;
+  p.cooldownSec = Math.round(num(p.cooldownSec, 60, 3600, DEFAULT_PET.cooldownSec));
+  p.imagesPerHour = Math.round(num(p.imagesPerHour, 0, 240, DEFAULT_PET.imagesPerHour));
+  p.voice.volume = Math.round(num(p.voice.volume, 0, 100, DEFAULT_PET.voice.volume));
+  p.voice.voiceId = p.voice.voiceId.trim().slice(0, 200);
+  const model = (v: unknown) => (typeof v === 'string' && MODEL_ID.test(v.trim()) ? v.trim() : '');
+  const m = p.voice.models ?? { elevenlabs: '', minimax: '' };
+  p.voice.models = { elevenlabs: model(m.elevenlabs), minimax: model(m.minimax) };
+  p.realtime.autoOffMin = Math.round(num(p.realtime.autoOffMin, 5, 120, DEFAULT_PET.realtime.autoOffMin));
+  p.realtime.sensitivity = Math.round(num(p.realtime.sensitivity, 0, 100, DEFAULT_PET.realtime.sensitivity));
+  if (p.realtime.listen !== 'auto' && p.realtime.listen !== 'key') p.realtime.listen = DEFAULT_PET.realtime.listen;
+  p.hotkeyAsk = p.hotkeyAsk.trim().slice(0, 40) || DEFAULT_PET.hotkeyAsk;
+  p.hotkeyPause = p.hotkeyPause.trim().slice(0, 40) || DEFAULT_PET.hotkeyPause;
+  for (const k of ['neverWatch', 'gameAllow', 'gameDeny'] as const) {
+    const next = [...new Set(p[k].map((x) => x.trim().toLowerCase()).filter(Boolean))].slice(0, 200);
+    // Only replace the array when it changed, so an unrelated edit does not look like a new list.
+    if (next.length !== p[k].length || next.some((x, i) => x !== p[k][i])) p[k] = next;
+  }
+}
 
 function feedback(t: ToastInput, spoken?: string) {
   store.update((d) => {
@@ -245,6 +275,18 @@ export const actions = {
     store.update((d) => {
       d.settings[key] = value;
       if (key === 'mode' || key === 'persona') syncPersonaAgent(d);
+    });
+  },
+  /** Change 桌宠 settings. `voice` and `realtime` merge field by field; every other key replaces its value
+   *  (so `{ vision: undefined }` clears the model choice). */
+  setPet(patch: PetPatch) {
+    store.update((d) => {
+      const { voice, realtime, ...rest } = patch;
+      const p = d.settings.pet;
+      Object.assign(p, rest);
+      if (voice) Object.assign(p.voice, voice);
+      if (realtime) Object.assign(p.realtime, realtime);
+      tidyPet(p);
     });
   },
   /** Delete every task, run and event; settings, model access, agents and tool policies stay. */

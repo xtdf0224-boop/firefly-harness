@@ -1,0 +1,35 @@
+edge-tts notice
+===============
+
+File
+  electron/pet/tts-edge-gec.cjs  (inside the installed app: resources/app.asar, electron/pet/)
+
+What it is
+  A JavaScript port of generate_sec_ms_gec_v2 from src/edge_tts/drm.py in edge-tts
+  (https://github.com/rany2/edge-tts, version 7.3), by rany and the edge-tts contributors.
+  It makes the Sec-MS-GEC token that Microsoft's online read-aloud service asks for.
+  The port was written by xtdf0224-boop.
+
+Licence
+  edge-tts is licensed under the GNU Lesser General Public License v3.0, except
+  src/edge_tts/srt_composer.py, which is MIT. drm.py, the file this one is ported from,
+  is under the LGPL. The port is a derivative work and is distributed under the same
+  licence: SPDX-License-Identifier: LGPL-3.0-only.
+
+  The rest of this project is MIT (see LICENSE). Only this one file is under the LGPL.
+
+Licence texts
+  The full texts are in this folder (licenses/ in the source, and in the installed app the
+  licenses folder next to FireflyHarness.exe):
+    licenses/LGPL-3.0.txt
+    licenses/GPL-3.0.txt   (the LGPL is an additional set of permissions on top of the GPL)
+  and online:
+    https://www.gnu.org/licenses/lgpl-3.0.txt
+    https://www.gnu.org/licenses/gpl-3.0.txt
+
+Replacing the file
+  The file ships as plain JavaScript (not compiled or minified) inside the app, and nothing
+  else depends on how it is written, only on its two exports (secMsGec and
+  TRUSTED_CLIENT_TOKEN). You can replace it with your own or a modified version of the same
+  function: unpack resources/app.asar, change electron/pet/tts-edge-gec.cjs, and pack it
+  again, or run the application from source (see README.md).

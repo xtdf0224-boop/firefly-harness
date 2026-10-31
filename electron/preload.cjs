@@ -6,6 +6,8 @@ const listeners = new Set();
 ipcRenderer.on('ai:event', (_e, ev) => { for (const l of listeners) l(ev); });
 const commands = new Set();
 ipcRenderer.on('app:command', (_e, cmd) => { for (const l of commands) l(cmd); });
+const petListeners = new Set();
+ipcRenderer.on('pet:event', (_e, ev) => { for (const l of petListeners) l(ev); });
 
 contextBridge.exposeInMainWorld('fireflyDesktop', {
   version: 1,
@@ -33,6 +35,21 @@ contextBridge.exposeInMainWorld('fireflyDesktop', {
   browser: {
     open: () => ipcRenderer.invoke('browser:open'),
     clear: () => ipcRenderer.invoke('browser:clear'),
+  },
+  /** 桌宠 (docs/PET.md §3.1), handled in electron/pet/index.cjs. */
+  pet: {
+    configure: (cfg) => ipcRenderer.send('pet:config', cfg),
+    say: (line) => ipcRenderer.invoke('pet:say', line),
+    frame: (opts) => ipcRenderer.invoke('pet:frame', opts),
+    ocr: () => ipcRenderer.invoke('pet:ocr'),
+    voices: (provider) => ipcRenderer.invoke('pet:tts:voices', provider),
+    testVoice: (v) => ipcRenderer.invoke('pet:tts:test', v),
+    ttsModels: (provider) => ipcRenderer.invoke('pet:tts:models', provider),
+    saveTtsKey: (provider, key) => ipcRenderer.invoke('pet:tts:key', provider, key),
+    clearTtsKey: (provider) => ipcRenderer.invoke('pet:tts:clear', provider),
+    ttsKeys: () => ipcRenderer.invoke('pet:tts:keys'),
+    realtime: (cmd) => ipcRenderer.invoke('pet:rt', cmd),
+    onEvent: (fn) => { petListeners.add(fn); return () => petListeners.delete(fn); },
   },
   skills: {
     list: () => ipcRenderer.invoke('skills:list'),

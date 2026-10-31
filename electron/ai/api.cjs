@@ -1,6 +1,8 @@
 // Direct API calls: OpenAI-compatible Chat Completions (GPT, DeepSeek, Kimi, Qwen, GLM, MiniMax,
 // 豆包) and the Anthropic Messages API (Claude). Both stream; text arrives as `text` events,
 // reasoning as `thinking`, token counts as `usage`. The key is read here and never leaves this process.
+// A message's content is a string, or (user turns, checked in index.cjs) a list of text and base64
+// image parts, as the 桌宠 sends a screenshot.
 
 const FIRST_BYTE_MS = 90_000;
 const COMPLETION_TOKENS = new Set(['gpt', 'kimi', 'qwen', 'minimax']);
@@ -213,6 +215,31 @@ const incomplete = () => Object.assign(new Error('连接提前结束，没有收
 /** The stream ended with [DONE] but nothing was said before it. */
 const emptyReply = () => Object.assign(new Error('模型没有返回内容（服务只发来了结束标记）。可以重新生成或重试这一步。'), { code: 'EEMPTY' });
 
+/** Content for the OpenAI-compatible API: a string stays one; parts become text / image_url blocks in order. */
+function openAiContent(content) {
+  if (!Array.isArray(content)) return String(content);
+  const out = [];
+  for (const p of content) {
+    if (!p) continue;
+    if (p.type === 'text' && p.text) out.push({ type: 'text', text: String(p.text) });
+    else if (p.type === 'image' && p.data) out.push({ type: 'image_url', image_url: { url: `data:${p.mime};base64,${p.data}` } });
+  }
+  return out;
+}
+
+/** The same for the Messages API. Images go first: Claude answers a question about an image better when it has seen the image. */
+function anthropicContent(content) {
+  if (!Array.isArray(content)) return String(content);
+  const images = [];
+  const texts = [];
+  for (const p of content) {
+    if (!p) continue;
+    if (p.type === 'image' && p.data) images.push({ type: 'image', source: { type: 'base64', media_type: p.mime, data: p.data } });
+    else if (p.type === 'text' && p.text) texts.push({ type: 'text', text: String(p.text) });
+  }
+  return [...images, ...texts];
+}
+
 function joinUrl(base, suffix) {
   return `${String(base).replace(/\/+$/, '')}${suffix}`;
 }
@@ -264,7 +291,7 @@ async function failureText({ res, abort }) {
 async function streamOpenAI(spec, key, emit, signal) {
   const messages = [];
   if (spec.system) messages.push({ role: 'system', content: spec.system });
-  for (const m of spec.messages || []) messages.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content) });
+  for (const m of spec.messages || []) messages.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: openAiContent(m.content) });
   const body = { model: spec.model, messages, stream: true, stream_options: { include_usage: true } };
   // OpenAI, Kimi, Qwen and MiniMax have moved to max_completion_tokens (it counts thinking tokens too);
   // DeepSeek, GLM and Ark still document max_tokens. OpenAI's reasoning models only take the default temperature.
@@ -339,7 +366,7 @@ async function streamAnthropic(spec, key, emit, signal) {
     model: spec.model,
     max_tokens: spec.maxTokens || 4096,
     stream: true,
-    messages: (spec.messages || []).map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content) })),
+    messages: (spec.messages || []).map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: anthropicContent(m.content) })),
   };
   if (spec.system) body.system = spec.system;
   applyExtra(body, spec.extraBody);
@@ -419,4 +446,4 @@ async function streamAnthropic(spec, key, emit, signal) {
   return { text: full, stopReason: stop || 'end_turn' };
 }
 
-module.exports = { streamOpenAI, streamAnthropic, thinkSplitter, netError, httpError };
+module.exports = { streamOpenAI, streamAnthropic, thinkSplitter, openAiContent, anthropicContent, netError, httpError };

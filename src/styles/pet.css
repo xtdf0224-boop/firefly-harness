@@ -1,0 +1,443 @@
+/* The 桌宠 window (pet.html). The page is 300 x 400 px at 100 % (300 x 630 while the chat panel is open), drawn on a
+   transparent window; the desktop side resizes the window and the page scales with `zoom` (set in PetApp). Nothing
+   here may paint a background: only the figure, the bubble and the chat panel exist. */
+:root {
+  --pet-ink: #eef4f6;
+  --pet-soft: rgba(238, 244, 246, 0.66);
+  --pet-panel: rgba(12, 18, 28, 0.9);
+  --pet-line: rgba(124, 236, 205, 0.5);
+  --pet-accent: #7cecd0;
+  --pet-warn: #ffcf70;
+  --pet-font: 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+  --pet-mono: 'Cascadia Mono', Consolas, 'Microsoft YaHei UI', monospace;
+  /* The chat panel: her soft glass with a warm glow; the user's messages in her colours (mint skirt, gold tie). */
+  --chat-bg: linear-gradient(180deg, rgba(30, 36, 46, 0.95), rgba(16, 21, 30, 0.96));
+  --chat-glow: radial-gradient(130% 70% at 0% 0%, rgba(255, 196, 128, 0.13), transparent 60%);
+  --chat-edge: rgba(255, 236, 214, 0.16);
+  --chat-her: rgba(255, 255, 255, 0.075);
+  --chat-her-edge: rgba(124, 236, 208, 0.24);
+  --chat-me: linear-gradient(135deg, #a4f0dc, #ffdba0);
+  --chat-me-ink: #13202a;
+  --chat-warm: #ffd08a;
+  --chat-radius: 18px;
+  /* Where her face is in the 640 px idle sprite: a 200 px square from (200, 130). */
+  --avatar-size: 320%;
+  --avatar-pos: 45.5% 29.5%;
+}
+:root[data-mode='sam'] {
+  --pet-line: rgba(120, 164, 255, 0.58);
+  --pet-accent: #78a8ff;
+  /* A combat terminal: dark steel, cut corners, scan lines, blue glow. */
+  --chat-bg: linear-gradient(180deg, rgba(10, 16, 32, 0.96), rgba(6, 10, 22, 0.97));
+  --chat-glow: repeating-linear-gradient(180deg, rgba(120, 168, 255, 0.045) 0 1px, transparent 1px 3px);
+  --chat-edge: rgba(120, 168, 255, 0.42);
+  --chat-her: rgba(120, 168, 255, 0.09);
+  --chat-her-edge: rgba(120, 168, 255, 0.55);
+  --chat-me: rgba(120, 168, 255, 0.24);
+  --chat-me-ink: #eaf1ff;
+  --chat-warm: #8ff0ff;
+  --chat-radius: 3px;
+  /* Her helmet: a 200 px square from (240, 115). */
+  --avatar-pos: 54.5% 26%;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+body {
+  font: 14px/1.55 var(--pet-font);
+  color: var(--pet-ink);
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+.pet {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+/* ───── the figure ───── */
+.pet-stage { position: relative; flex: none; width: 224px; height: 224px; }
+.pet-figure {
+  position: relative;
+  flex: none;
+  width: 224px;
+  height: 224px;
+  cursor: grab;
+  touch-action: none;
+  /* Clicks on the empty corners of the sprite's box fall through to whatever is below. */
+  clip-path: ellipse(46% 50% at 50% 50%);
+  animation: pet-breathe 3.6s ease-in-out infinite;
+}
+.pet-figure:active { cursor: grabbing; }
+.pet-frames { position: relative; width: 100%; height: 100%; }
+.pet-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: 50% 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+.pet-frame[data-on] { opacity: 1; }
+/* The puppet (WebGL): it breathes by itself, so the whole-figure bob is switched off once it draws. */
+.pet-puppet { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+.pet-puppet:not([data-ready]) { visibility: hidden; }
+.pet-figure:has(> .pet-puppet[data-ready]) { animation: none; }
+.pet-placeholder { width: 100%; height: 100%; display: block; color: var(--pet-accent); pointer-events: none; overflow: visible; }
+.pet-ph-z { fill: var(--pet-accent); font: 700 26px var(--pet-font); }
+.pet-ph-dots { opacity: 0.85; }
+
+.pet-badges { position: absolute; top: 8px; right: 0; display: flex; gap: 4px; pointer-events: none; }
+.pet-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 11px;
+  background: var(--pet-panel);
+  border: 1px solid var(--pet-line);
+  color: var(--pet-accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.pet-badge--off { color: var(--pet-warn); border-color: rgba(255, 207, 112, 0.5); }
+.pet-badge--live { color: #ff8f9d; border-color: rgba(255, 143, 157, 0.55); }
+
+/* ───── the bubble ───── */
+.pet-bubble {
+  position: relative;
+  max-width: 276px;
+  min-width: 52px;
+  margin: 0 12px 10px;
+  padding: 9px 26px 10px 13px;
+  border-radius: 16px;
+  background: var(--pet-panel);
+  border: 1px solid var(--pet-line);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.38);
+  cursor: default;
+  animation: pet-pop 0.18s ease-out;
+}
+.pet-bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  background: var(--pet-panel);
+  border-right: 1px solid var(--pet-line);
+  border-bottom: 1px solid var(--pet-line);
+  transform: rotate(45deg);
+}
+.pet-bubble__text {
+  margin: 0;
+  /* Ten lines (16 characters each): a line of up to 140 characters (prompts.ts BUBBLE_MAX), which has no 展开, shows whole.
+     The bubble grows upward from her head; the window is 630 px tall, so it has room. */
+  max-height: calc(10 * 1.55em);
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.pet-bubble[data-open] { max-width: 284px; z-index: 2; margin-bottom: -56px; padding-bottom: 14px; }
+.pet-bubble[data-open] .pet-bubble__text { max-height: calc(12 * 1.55em); overflow-y: auto; padding-right: 4px; scrollbar-width: thin; }
+.pet-bubble[data-streaming] .pet-bubble__text::after { content: '▍'; margin-left: 1px; color: var(--pet-accent); animation: pet-caret 1s steps(2) infinite; }
+.pet-bubble__more {
+  display: inline-block;
+  margin: 3px 0 -2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pet-accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pet-bubble__more:hover { text-decoration: underline; }
+.pet-bubble__close {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--pet-soft);
+  font-size: 15px;
+  line-height: 20px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.pet-bubble:hover .pet-bubble__close, .pet-bubble__close:focus-visible { opacity: 1; }
+.pet-bubble__close:hover { color: var(--pet-ink); background: rgba(255, 255, 255, 0.08); }
+
+.pet-bubble__more:focus-visible, .pet-bubble__close:focus-visible { outline: 2px solid var(--pet-accent); outline-offset: 2px; }
+
+/* ───── the chat button beside her (on hover) ───── */
+.pet-chatbtn {
+  position: absolute;
+  left: 14px;
+  top: 58px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--pet-panel);
+  border: 1px solid var(--pet-line);
+  color: var(--pet-accent);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  animation: pet-pop 0.14s ease-out;
+}
+.pet-chatbtn:hover { color: var(--pet-ink); border-color: var(--pet-accent); }
+:root[data-mode='sam'] .pet-chatbtn { border-radius: 2px; transform: rotate(45deg); animation: none; }
+:root[data-mode='sam'] .pet-chatbtn > svg { transform: rotate(-45deg); }
+
+/* ───── the chat panel ───── */
+.pet-chat {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 284px;
+  margin: 8px 8px 6px;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--chat-radius);
+  background: var(--chat-glow), var(--chat-bg);
+  border: 1px solid var(--chat-edge);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  animation: pet-pop 0.18s ease-out;
+}
+/* 萨姆: corner brackets instead of a soft edge. */
+:root[data-mode='sam'] .pet-chat::before, :root[data-mode='sam'] .pet-chat::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--pet-accent);
+  pointer-events: none;
+  filter: drop-shadow(0 0 3px rgba(120, 168, 255, 0.7));
+}
+:root[data-mode='sam'] .pet-chat::before { top: -2px; left: -2px; border-right: 0; border-bottom: 0; }
+:root[data-mode='sam'] .pet-chat::after { bottom: -2px; right: -2px; border-left: 0; border-top: 0; }
+
+.pet-chat__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 8px 8px 11px;
+  border-bottom: 1px solid var(--chat-edge);
+}
+.pet-chat__who { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.pet-chat__name { font-size: 14px; font-weight: 700; letter-spacing: 0.04em; }
+.pet-chat__state { font-size: 11px; color: var(--pet-soft); }
+.pet-chat__state::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 5px 1px 0;
+  border-radius: 50%;
+  background: var(--pet-accent);
+  vertical-align: middle;
+}
+.pet-chat__state[data-doing] { color: var(--chat-warm); }
+.pet-chat__state[data-doing]::before { background: var(--chat-warm); animation: pet-glow 1s ease-in-out infinite; }
+:root[data-mode='sam'] .pet-chat__name { font-family: var(--pet-mono); letter-spacing: 0.2em; }
+:root[data-mode='sam'] .pet-chat__state { font-family: var(--pet-mono); letter-spacing: 0.08em; }
+:root[data-mode='sam'] .pet-chat__state::before { border-radius: 0; }
+.pet-chat__close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--pet-soft);
+  font-size: 18px;
+  line-height: 26px;
+  cursor: pointer;
+}
+.pet-chat__close:hover { color: var(--pet-ink); background: rgba(255, 255, 255, 0.09); }
+:root[data-mode='sam'] .pet-chat__close { border-radius: 2px; }
+
+.pet-chat__body { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.pet-chat__log {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 9px 6px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+.pet-chat__log:focus-visible { outline: 2px solid var(--pet-accent); outline-offset: -2px; }
+.pet-chat__empty { margin: auto; padding: 0 18px; color: var(--pet-soft); font-size: 12px; text-align: center; }
+
+.pet-msg { display: flex; align-items: flex-end; gap: 6px; max-width: 100%; }
+.pet-msg[data-who='me'] { justify-content: flex-end; }
+.pet-msg:not([data-first]) { margin-top: -3px; }
+.pet-msg__gap { flex: none; width: 24px; }
+.pet-msg__text {
+  margin: 0;
+  max-width: 214px;
+  padding: 6px 10px 7px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+.pet-msg[data-who='her'] .pet-msg__text {
+  background: var(--chat-her);
+  border: 1px solid var(--chat-her-edge);
+  border-radius: 14px 14px 14px 5px;
+}
+.pet-msg[data-who='me'] .pet-msg__text {
+  max-width: 220px;
+  background: var(--chat-me);
+  color: var(--chat-me-ink);
+  border-radius: 14px 14px 5px 14px;
+}
+:root[data-mode='sam'] .pet-msg[data-who='her'] .pet-msg__text { border-width: 0 0 0 2px; border-radius: 0; }
+:root[data-mode='sam'] .pet-msg[data-who='me'] .pet-msg__text {
+  border: 1px solid var(--chat-her-edge);
+  border-radius: 0;
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+}
+.pet-msg[data-think] .pet-msg__text { color: var(--pet-soft); }
+.pet-msg[data-streaming] .pet-msg__text::after { content: '▍'; margin-left: 1px; color: var(--pet-accent); animation: pet-caret 1s steps(2) infinite; }
+.pet-msg__voice { display: inline-flex; margin-right: 4px; vertical-align: -1px; opacity: 0.7; }
+
+/* Her face, cropped from her own idle sprite (PetApp sets the picture). */
+.pet-avatar {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background-color: rgba(124, 236, 208, 0.18);
+  background-repeat: no-repeat;
+  background-size: var(--avatar-size);
+  background-position: var(--avatar-pos);
+  box-shadow: 0 0 0 1.5px var(--chat-her-edge), 0 0 8px rgba(255, 196, 128, 0.25);
+}
+.pet-chat__head .pet-avatar { width: 32px; height: 32px; }
+:root[data-mode='sam'] .pet-avatar { background-color: rgba(120, 168, 255, 0.16); box-shadow: 0 0 0 1.5px var(--pet-accent), 0 0 8px rgba(120, 168, 255, 0.45); }
+
+/* Three little lights while she thinks (萨姆: square ones). */
+.pet-dots { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: middle; }
+.pet-dots > i { width: 5px; height: 5px; border-radius: 50%; background: var(--chat-warm); animation: pet-glow 1.2s ease-in-out infinite; }
+.pet-dots > i:nth-child(2) { animation-delay: 0.2s; }
+.pet-dots > i:nth-child(3) { animation-delay: 0.4s; }
+:root[data-mode='sam'] .pet-dots > i { border-radius: 0; }
+
+.pet-chat__new {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  padding: 3px 11px;
+  border: 1px solid var(--pet-line);
+  border-radius: 11px;
+  background: var(--pet-panel);
+  color: var(--pet-accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pet-chat__composer {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  margin: 2px 8px 8px;
+  padding: 5px 5px 5px 11px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--chat-edge);
+  opacity: 0.8;
+  transition: border-color 0.15s, opacity 0.15s;
+}
+.pet-chat[data-keys] .pet-chat__composer { opacity: 1; }
+.pet-chat[data-keys] .pet-chat__composer:focus-within { border-color: var(--pet-accent); box-shadow: 0 0 0 3px rgba(124, 236, 208, 0.12); }
+:root[data-mode='sam'] .pet-chat__composer { border-radius: 2px; background: rgba(120, 168, 255, 0.07); }
+:root[data-mode='sam'] .pet-chat[data-keys] .pet-chat__composer:focus-within { box-shadow: 0 0 0 3px rgba(120, 168, 255, 0.16); }
+.pet-chat__input {
+  flex: 1;
+  min-width: 0;
+  /* One to four lines, growing with the text. */
+  field-sizing: content;
+  min-height: calc(1.55em + 6px);
+  max-height: calc(4 * 1.55em + 6px);
+  padding: 3px 0;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--pet-ink);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  scrollbar-width: thin;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.pet-chat__input::placeholder { color: var(--pet-soft); }
+.pet-chat__count { flex: none; align-self: center; font-size: 10px; color: var(--chat-warm); font-variant-numeric: tabular-nums; }
+.pet-chat__send {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--pet-accent);
+  color: #0b1218;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.pet-chat__send:disabled { opacity: 0.35; cursor: default; }
+:root[data-mode='sam'] .pet-chat__send { border-radius: 2px; clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%); }
+.pet-chatbtn:focus-visible, .pet-chat__close:focus-visible, .pet-chat__send:focus-visible, .pet-chat__new:focus-visible { outline: 2px solid var(--pet-accent); outline-offset: 2px; }
+
+.pet-badge--ear { animation: pet-ear 1.1s ease-in-out infinite; }
+@keyframes pet-ear { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@keyframes pet-pop { from { opacity: 0; transform: translateY(6px) scale(0.94); } to { opacity: 1; transform: none; } }
+@keyframes pet-breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes pet-caret { to { visibility: hidden; } }
+@keyframes pet-glow { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pet-figure, .pet-bubble, .pet-badge--ear, .pet-chat, .pet-chatbtn { animation: none; }
+  .pet-bubble[data-streaming] .pet-bubble__text::after, .pet-msg[data-streaming] .pet-msg__text::after { animation: none; }
+  .pet-dots > i, .pet-chat__state[data-doing]::before { animation: none; opacity: 0.8; }
+  .pet-chat__composer, .pet-chat__send { transition: none; }
+}

@@ -3,8 +3,9 @@
    suggestions — any model id the vendor accepts can be typed in. */
 import type { DriverId, ProviderConfig, ProviderId } from './types';
 
-/** `label`: the product name with its version (Claude Sonnet 5.5); `ctx`: context window in tokens, when documented. */
-export interface ModelOption { id: string; label?: string; note?: string; ctx?: number }
+/** `label`: the product name with its version (Claude Sonnet 5.5); `ctx`: context window in tokens, when documented;
+    `vision`: image input over the API, set only where the vendor's own docs say so (checked 2026-10-20). */
+export interface ModelOption { id: string; label?: string; note?: string; ctx?: number; vision?: boolean }
 export interface RegionOption {
   id: string;
   label: string;
@@ -85,10 +86,10 @@ export const PROVIDERS: ProviderInfo[] = [
     id: 'claude', name: 'Claude', vendor: 'Anthropic', glyph: 'C', protocol: 'anthropic',
     regions: [{ id: 'global', label: '官方', baseUrl: 'https://api.anthropic.com' }],
     models: [
-      { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', note: '均衡', ctx: 1_000_000 },
-      { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', note: '更强', ctx: 1_000_000 },
-      { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', note: '旗舰', ctx: 1_000_000 },
-      { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', note: '快速', ctx: 1_000_000 },
+      { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', note: '均衡', ctx: 1_000_000, vision: true },
+      { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', note: '更强', ctx: 1_000_000, vision: true },
+      { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', note: '旗舰', ctx: 1_000_000, vision: true },
+      { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', note: '快速', ctx: 1_000_000, vision: true },
     ],
     cliModels: { 'claude-code': [
       { id: '', note: 'Claude Code 默认' },
@@ -104,9 +105,9 @@ export const PROVIDERS: ProviderInfo[] = [
     id: 'gpt', name: 'GPT', vendor: 'OpenAI', glyph: 'G', protocol: 'openai',
     regions: [{ id: 'global', label: '官方', baseUrl: 'https://api.openai.com/v1' }],
     models: [
-      { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', note: '均衡', ctx: 1_050_000 },
-      { id: 'gpt-6-astra', label: 'GPT-6 Astra', note: '旗舰', ctx: 1_050_000 },
-      { id: 'gpt-6-luna', label: 'GPT-6 Luna', note: '快速', ctx: 1_050_000 },
+      { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', note: '均衡', ctx: 1_050_000, vision: true },
+      { id: 'gpt-6-astra', label: 'GPT-6 Astra', note: '旗舰', ctx: 1_050_000, vision: true },
+      { id: 'gpt-6-luna', label: 'GPT-6 Luna', note: '快速', ctx: 1_050_000, vision: true },
     ],
     cliModels: { codex: [
       { id: '', note: 'Codex 默认' },
@@ -121,7 +122,7 @@ export const PROVIDERS: ProviderInfo[] = [
     id: 'deepseek', name: 'DeepSeek', vendor: '深度求索', glyph: 'D', protocol: 'openai',
     regions: [{ id: 'cn', label: '官方', baseUrl: 'https://api.deepseek.com', compatUrl: 'https://api.deepseek.com/anthropic' }],
     models: [
-      { id: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', note: '快速', ctx: 1_000_000 },
+      { id: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', note: '快速', ctx: 1_000_000, vision: true },
       { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', note: '旗舰' },
     ],
     cliModels: {
@@ -138,10 +139,10 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: 'global', label: '国际', baseUrl: 'https://api.moonshot.ai/v1', compatUrl: 'https://api.moonshot.ai/anthropic' },
     ],
     models: [
-      { id: 'kimi-k3', label: 'Kimi K3', note: '旗舰', ctx: 1_000_000 },
-      { id: 'kimi-k2.7-code', label: 'Kimi K2.7 Code', note: '编程', ctx: 256_000 },
+      { id: 'kimi-k3', label: 'Kimi K3', note: '旗舰', ctx: 1_000_000, vision: true },
+      { id: 'kimi-k2.7-code', label: 'Kimi K2.7 Code', note: '编程', ctx: 256_000, vision: true },
       { id: 'kimi-k2.7-code-highspeed', label: 'Kimi K2.7 Code 高速版', note: '快速编程', ctx: 256_000 },
-      { id: 'kimi-k2.6', label: 'Kimi K2.6', note: '上一代', ctx: 256_000 },
+      { id: 'kimi-k2.6', label: 'Kimi K2.6', note: '上一代', ctx: 256_000, vision: true },
     ],
     cliModels: {
       kimi: [{ id: '', note: 'Kimi Code 默认' }],
@@ -162,9 +163,9 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: 'coding', label: 'Coding Plan', baseUrl: 'https://coding.dashscope.aliyuncs.com/v1', compatUrl: 'https://coding.dashscope.aliyuncs.com/apps/anthropic' },
     ],
     models: [
-      { id: 'qwen3.7-plus', label: 'Qwen3.7 Plus', note: '均衡 · Coding Plan 可用' },
-      { id: 'qwen3.8-max', label: 'Qwen3.8 Max', note: '旗舰' },
-      { id: 'qwen3.8-flash', label: 'Qwen3.8 Flash', note: '快速' },
+      { id: 'qwen3.7-plus', label: 'Qwen3.7 Plus', note: '均衡 · Coding Plan 可用', vision: true },
+      { id: 'qwen3.8-max', label: 'Qwen3.8 Max', note: '旗舰', vision: true },
+      { id: 'qwen3.8-flash', label: 'Qwen3.8 Flash', note: '快速', vision: true },
     ],
     cliModels: {
       qwen: [{ id: 'qwen3.7-plus', label: 'Qwen3.7 Plus', note: '均衡' }, { id: 'qwen3.8-max', label: 'Qwen3.8 Max', note: '旗舰' }],
@@ -182,7 +183,7 @@ export const PROVIDERS: ProviderInfo[] = [
     ],
     models: [
       { id: 'glm-5.3', label: 'GLM-5.3', note: '旗舰', ctx: 1_000_000 },
-      { id: 'glm-5.3-flash', label: 'GLM-5.3 Flash', note: '快速', ctx: 1_000_000 },
+      { id: 'glm-5.3-flash', label: 'GLM-5.3 Flash', note: '快速', ctx: 1_000_000, vision: true },
     ],
     cliModels: { 'claude-compat': [
       { id: 'glm-5.3', label: 'GLM-5.3', note: '旗舰', ctx: 1_000_000 },
@@ -198,7 +199,7 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: 'global', label: '国际', baseUrl: 'https://api.minimax.io/v1', compatUrl: 'https://api.minimax.io/anthropic' },
     ],
     models: [
-      { id: 'MiniMax-M3', label: 'MiniMax M3', note: '旗舰', ctx: 1_000_000 },
+      { id: 'MiniMax-M3', label: 'MiniMax M3', note: '旗舰', ctx: 1_000_000, vision: true },
       { id: 'MiniMax-M2.7', label: 'MiniMax M2.7', note: '均衡' },
       { id: 'MiniMax-M2.7-highspeed', label: 'MiniMax M2.7 高速版', note: '快速' },
       { id: 'MiniMax-M2.5', label: 'MiniMax M2.5', note: '编程' },
@@ -217,7 +218,7 @@ export const PROVIDERS: ProviderInfo[] = [
       { id: 'coding', label: 'Coding Plan', baseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3', compatUrl: 'https://ark.cn-beijing.volces.com/api/coding' },
     ],
     models: [
-      { id: 'doubao-seed-2-1-pro-260915', label: '豆包 Seed 2.1 Pro', note: '旗舰', ctx: 1_000_000 },
+      { id: 'doubao-seed-2-1-pro-260915', label: '豆包 Seed 2.1 Pro', note: '旗舰', ctx: 1_000_000, vision: true },
       { id: 'doubao-seed-2-1-lite-260915', label: '豆包 Seed 2.1 Lite', note: '快速', ctx: 1_000_000 },
       { id: 'doubao-seed-evolving', label: '豆包 Seed Evolving', note: '编程 · 最新' },
     ],
@@ -238,6 +239,12 @@ export function modelInfo(p: ProviderInfo, model: string): ModelOption | undefin
   if (!model) return undefined;
   const all = [...p.models, ...Object.values(p.cliModels).flat()].filter((m): m is ModelOption => !!m && !!m.id);
   return all.find((m) => m.id === model) ?? all.find((m) => m.id.replace(/\[1m\]$/i, '') === model.replace(/\[1m\]$/i, '') && !!m.label);
+}
+
+/** Does this model take image input over the API? Only catalog models the vendor's docs confirm; a model typed in by hand is unknown, so no. */
+export function modelSeesImages(p: ProviderInfo | ProviderId, model: string): boolean {
+  const info = typeof p === 'string' ? PROVIDER_BY_ID[p] : p;
+  return !!info?.models.find((m) => m.id === model)?.vision;
 }
 
 /** 「Claude Sonnet 5.5」 for claude-sonnet-5-5 / sonnet[1m]; the id itself for models not in the catalog. */

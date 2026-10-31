@@ -14,7 +14,7 @@ import { PROVIDERS, PROVIDER_BY_ID, ctxLabel, engineLabel, modelName, shortModel
 import type { AppState, Approval, PlanStep, Run, Task, TaskEngine, ToolCall } from '../src/lib/types';
 import { actions } from '../src/state/actions';
 import * as engine from '../src/state/engine';
-import { engineChoices, initialModels, menuValue, modelMenuGroups, parseMenuValue } from '../src/state/models';
+import { engineChoices, initialModels, menuValue, modelMenuGroups, parseMenuValue, petThrift } from '../src/state/models';
 import { loadState } from '../src/state/persist';
 import { emptyState } from '../src/state/seed';
 import { store } from '../src/state/store';
@@ -76,6 +76,15 @@ eq('GLM', modelName(PROVIDER_BY_ID.glm, 'glm-5.3'), 'GLM-5.3');
 eq('MiniMax', modelName(PROVIDER_BY_ID.minimax, 'MiniMax-M3'), 'MiniMax M3');
 eq('豆包', modelName(PROVIDER_BY_ID.doubao, 'doubao-seed-2-1-pro-260915'), '豆包 Seed 2.1 Pro');
 expect('every catalog model has a name', PROVIDERS.every((p) => [...p.models, ...Object.values(p.cliModels).flat()].every((m) => !m || !m.id || !!m.label)));
+
+console.log('桌宠 picks the cheapest vision model');
+eq('MiniMax M3 is a flagship, not the cheapest tier', petThrift('旗舰', 'MiniMax-M3'), 3);
+eq('even without its note, "minimax" does not read as "mini"', petThrift(undefined, 'MiniMax-M3'), 3);
+eq('Haiku is the cheapest tier', petThrift('快速', 'claude-haiku-5-5'), 0);
+eq('Luna is the cheapest tier', petThrift('快速', 'gpt-6-luna'), 0);
+eq('a gpt-x-mini id is the cheapest tier', petThrift(undefined, 'gpt-5-mini'), 0);
+eq('a mini with a date suffix too', petThrift(undefined, 'gpt-5.1-mini-2026-01-01'), 0);
+eq('Qwen Plus stays 均衡', petThrift('均衡', 'qwen3.7-plus'), 1);
 
 console.log('Engine labels');
 eq('CLI with a model', engineLabel(claude, 'cli', 'claude-code', 'sonnet[1m]'), 'Claude Sonnet 5.5 · Claude Code');

@@ -1,8 +1,25 @@
 /* The starting point of a fresh install: default settings, the agent roster, tool policies and an
    empty task list. Nothing is made up — tasks, runs and models all come from what the user does. */
-import type { Agent, AppState, Settings, ToolDef } from '../lib/types';
+import type { Agent, AppState, PetSettings, Settings, ToolDef } from '../lib/types';
 import { PERSONA } from '../lib/persona';
 import { initialModels } from './models';
+
+export const DEFAULT_PET: PetSettings = {
+  enabled: false,
+  watch: true,
+  proactivity: 'normal',
+  cooldownSec: 120,
+  imagesPerHour: 20,
+  voice: { enabled: true, provider: 'elevenlabs', voiceId: '', volume: 80, fallback: true, models: { elevenlabs: '', minimax: '' } },
+  // Global shortcuts: a bare Alt+letter would swallow that program's menu everywhere (Alt+F = 文件), so these take Ctrl too.
+  hotkeyAsk: 'Ctrl+Alt+F',
+  hotkeyPause: 'Ctrl+Alt+P',
+  neverWatch: [],
+  gameAllow: [],
+  gameDeny: [],
+  realtime: { listen: 'auto', sensitivity: 50, fastVoice: true, autoOffMin: 20 },
+  scale: 1,
+};
 
 export const DEFAULT_SETTINGS: Settings = {
   mode: 'firefly',
@@ -24,6 +41,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lifeGreeting: true,
   lifeMood: true,
   lifeNudge: true,
+  pet: DEFAULT_PET,
 };
 
 export const AGENTS: Agent[] = [

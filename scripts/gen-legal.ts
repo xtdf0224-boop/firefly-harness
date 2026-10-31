@@ -1,5 +1,5 @@
 /* npm run legal — writes DISCLAIMER.md and build/license.txt (the installer's licence page) from the
-   same source as Settings › 免责声明与使用条款 (src/lib/terms.ts), plus the MIT licence for the code. */
+   same source as Settings › 免责声明与使用条款 (src/lib/terms.ts), plus the MIT licence for the code and the edge-tts notice. */
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_URL, TERMS, termsAsText } from '../src/lib/terms';
@@ -7,6 +7,8 @@ import { REPO_URL, TERMS, termsAsText } from '../src/lib/terms';
 // npm scripts run from the package root (the bundled script lives in node_modules/.cache).
 const at = (f: string) => path.join(process.cwd(), f);
 const mit = fs.readFileSync(at('LICENSE'), 'utf8');
+// One ported file (electron/pet/tts-edge-gec.cjs) is LGPL-3.0: its notice goes on the licence page too.
+const edgeNotice = fs.readFileSync(at('licenses/edge-tts-NOTICE.txt'), 'utf8');
 
 const md = [
   '# 免责声明与使用条款',
@@ -35,6 +37,11 @@ const txt = [
   '源代码许可证（仅适用于本项目的源代码，不适用于第 2 条所列第三方素材）',
   '',
   mit.trim(),
+  '',
+  '────────────────────────────────────────',
+  '第三方源代码声明（仅 electron/pet/tts-edge-gec.cjs 一个文件，按 LGPL-3.0）',
+  '',
+  edgeNotice.trim(),
   '',
 ].join('\r\n').replace(/\r?\n/g, '\r\n');
 fs.mkdirSync(at('build'), { recursive: true });

@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import './lib/presence';
+import { startPet } from './pet/brain';
 import { refreshModels } from './state/models';
 import { flushSave, loadState, saveSoon } from './state/persist';
 import { startEngine } from './state/runner';
@@ -19,6 +20,7 @@ import './styles/views-tasks.css';
 import './styles/views-config.css';
 import './styles/views-live.css';
 import './styles/menu.css';
+import './styles/pet-settings.css';
 import './styles/cursors.css';
 
 const initial = loadState(Date.now());
@@ -28,6 +30,7 @@ store.init(initial, saveSoon);
 startEngine();
 void refreshModels();
 startShellSync();
+startPet();
 window.addEventListener('pagehide', flushSave);
 // A file dropped on the window must never replace the app page.
 for (const type of ['dragover', 'drop'] as const) window.addEventListener(type, (e) => { if (!e.defaultPrevented) e.preventDefault(); });

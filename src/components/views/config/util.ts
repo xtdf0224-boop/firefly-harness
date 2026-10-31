@@ -53,7 +53,14 @@ export function selectToolStats(s: AppState): Dict<CallStat> {
   return out;
 }
 
-export interface Presence { taskId: string; runId: string; title: string; activity: AgentActivity }
+export interface Presence {
+  taskId: string;
+  runId: string;
+  title: string;
+  activity: AgentActivity;
+  /** The run's live line, e.g. 「第 4 步 · 改写会话校验」. */
+  text: string;
+}
 
 /** The open run each agent is currently the live agent of (first one wins). */
 export function selectPresence(s: AppState): Dict<Presence> {
@@ -63,7 +70,32 @@ export function selectPresence(s: AppState): Dict<Presence> {
     const id = run.live?.agentId;
     const task = s.tasks[run.taskId];
     if (!id || !task || out[id]) continue;
-    out[id] = { taskId: task.id, runId: run.id, title: task.title, activity: agentActivity(s, run, id) };
+    out[id] = { taskId: task.id, runId: run.id, title: task.title, activity: agentActivity(s, run, id), text: run.live?.text ?? '' };
+  }
+  return out;
+}
+
+/** An agent's latest failed tool call across every run; `open` = a failed call sits in a run that is still open. */
+export interface LastError { id: string; taskId: string; runId: string; title: string; message: string; at: number; open: boolean }
+
+export function selectLastErrors(s: AppState): Dict<LastError> {
+  const out: Dict<LastError> = {};
+  for (const run of Object.values(s.runs)) {
+    const open = isOpenRun(run.status);
+    for (const c of run.toolCalls) {
+      if (c.status !== 'error') continue;
+      const prev = out[c.agentId];
+      const latest = !prev || c.startedAt > prev.at;
+      out[c.agentId] = {
+        id: latest ? c.id : prev.id,
+        taskId: latest ? run.taskId : prev.taskId,
+        runId: latest ? run.id : prev.runId,
+        title: latest ? c.title : prev.title,
+        message: latest ? c.error?.message ?? '' : prev.message,
+        at: latest ? c.startedAt : prev.at,
+        open: open || !!prev?.open,
+      };
+    }
   }
   return out;
 }

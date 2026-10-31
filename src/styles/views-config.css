@@ -31,29 +31,8 @@
 .agents-legend__item { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
 .agents-legend__item svg { color: var(--mint); flex: none; }
 
-.agents-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
-  gap: var(--gap-shell);
-  align-items: stretch;
-}
-.agents-card { min-width: 0; }
-.agents-card__body { flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); }
-
-.agents-card__head { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
-.agents-card__id { flex: 1; min-width: 0; }
-.agents-card__name { font-size: var(--fs-lg); line-height: var(--lh-tight); }
-.agents-card__role { margin-top: 2px; font-size: var(--fs-sm); color: var(--text-2); }
-.agents-card__desc { font-size: var(--fs-sm); color: var(--text-2); }
-
-.agents-card__switch { border-block: 1px solid var(--line); padding-block: var(--sp-1); }
-.agents-card .switch-row { padding: var(--sp-2) 0; }
-/* The orchestrator's switch is locked, but its explanation must stay readable. */
-.agents-card .switch-row.is-disabled { opacity: 1; }
-.agents-card .switch-row.is-disabled .switch { opacity: 0.55; }
-
 .agents-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.agents-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-3); }/* A disabled tool differs by shape (dashed edge, struck through, ban icon), not colour alone. */
+.agents-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-3); }
 
 .agents-now { display: flex; flex-wrap: wrap; align-items: center; gap: 6px var(--sp-2); min-height: 24px; font-size: var(--fs-sm); color: var(--text-2); }
 .agents-now__task { display: inline-flex; align-items: baseline; gap: 2px; min-width: 0; max-width: 100%; }
@@ -72,37 +51,6 @@
 }
 .agents-link:hover { color: var(--mint-strong); text-decoration-color: currentColor; }
 
-.agents-card__foot {
-  position: relative;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  margin-top: auto;
-  padding-top: var(--sp-3);
-  border-top: 1px solid var(--line);
-}
-:root[data-mode="sam"] .agents-card__foot::before {
-  content: "";
-  position: absolute;
-  top: -1px;
-  left: 0;
-  width: 40px;
-  height: 1px;
-  background: var(--mint);
-  box-shadow: 0 0 6px rgb(95 227 200 / 0.6);
-}
-.agents-stats { display: flex; gap: var(--sp-5); margin: 0; }
-.agents-stat { display: flex; flex-direction: column-reverse; gap: 2px; }
-.agents-stat dt { font-size: var(--fs-xs); color: var(--text-3); }
-.agents-stat dd { margin: 0; font-size: var(--fs-lg); font-weight: var(--fw-semibold); line-height: 1.2; color: var(--text); font-variant-numeric: tabular-nums; }
-.agents-stat.is-error dd { color: var(--tone-danger); }
-:root[data-mode="sam"] .agents-stat dd { font-family: var(--font-mono); }
-
-/* Stopped agents: dashed edge, quieter surface, faded avatar. Text keeps full contrast. */
-.agents-card.is-disabled { background: var(--surface-sunken); border-style: dashed; }
-.agents-card.is-disabled .avatar { opacity: 0.5; filter: grayscale(0.85); }
-.agents-card.is-disabled .agents-card__name { color: var(--text-2); }
 /* ───────────── 工具与技能 ───────────── */
 
 /* Policy key: explained once, above the list. */
@@ -494,7 +442,6 @@
 /* ───────────── narrow ───────────── */
 @media (max-width: 639px) {
   .tools-row__policy { max-width: 100%; }
-  .agents-card__body { padding: var(--sp-3); }
   .history-search { width: 100%; }
 }
 /* Very narrow phones: tighten the three-way policy switch so it never overflows its row. */

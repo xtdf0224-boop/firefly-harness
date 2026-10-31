@@ -1,7 +1,7 @@
 /* 人设与活人感. 编排 Agent speaks as 流萤 in 流萤 mode and as 萨姆 in 萨姆 mode: the same person, two
    very different voices. Everything here is original writing in the characters' spirit — no lines
    quoted from the game. Interface labels stay plain; only what she *says* carries the persona. */
-import type { AgentId, VisualMode } from './types';
+import type { AgentActivity, AgentId, VisualMode } from './types';
 
 export interface PersonaDef {
   name: string;
@@ -212,4 +212,175 @@ export function eventLine(mode: VisualMode, event: 'plan' | 'done' | 'failed' | 
 /** Toast line when a run completes. */
 export function completionLine(mode: VisualMode, title: string) {
   return mode === 'sam' ? `「${title}」· 任务完成，目标达成。` : `「${title}」· 萤火汇聚，照亮了这一程的终点。`;
+}
+
+/* ───────────── Agent 页 · 编队 ───────────── */
+
+export type CrewState = 'idle' | 'thinking' | 'tool' | 'waiting' | 'paused' | 'off' | 'first';
+export type CrewPose = 'idle' | 'happy' | 'think' | 'watch' | 'talk' | 'sleep' | 'blink';
+
+export function crewTag(mode: VisualMode) {
+  return mode === 'sam' ? 'FORMATION · 编队终端' : '萤火编队';
+}
+
+export function crewSubtitle(mode: VisualMode) {
+  return mode === 'sam' ? '出击的每一个单元，都是我。' : '今夜与你同行的，都是我。';
+}
+
+const CREW_TITLE: Record<VisualMode, Record<AgentId, string>> = {
+  firefly: { orchestrator: '同行者', researcher: '寻光者', coder: '筑梦者', reviewer: '守夜人' },
+  sam: { orchestrator: '指挥核心', researcher: '侦察单元', coder: '构筑单元', reviewer: '校验单元' },
+};
+
+export function crewTitle(mode: VisualMode, id: AgentId) {
+  return CREW_TITLE[mode][id];
+}
+
+/** The helpers' lines; the orchestrator's drawer and card both say leadLine, so she has none here. */
+type Helper = Exclude<AgentId, 'orchestrator'>;
+type CrewLines = Record<VisualMode, Record<Helper, Record<CrewState, string[]>>>;
+
+const CREW_LINES: CrewLines = {
+  firefly: {
+    researcher: {
+      idle: ['资料都交回去了。下一次，也交给我吧。'],
+      thinking: ['在想该先找哪里……'],
+      tool: ['在找了……很快就带回来。'],
+      waiting: ['这一页要不要抓下来？想先问问你。'],
+      paused: ['先停一下……找到的我都留着。'],
+      off: ['我先歇一会儿……需要时再叫我。'],
+      first: ['等灯亮了，我就去替你找。'],
+    },
+    coder: {
+      idle: ['这一段写好了，在等下一步。'],
+      thinking: ['在想怎么改才稳妥……'],
+      tool: ['在动笔了，一行一行来。'],
+      waiting: ['要写进文件了……你看一眼，好吗？'],
+      paused: ['笔停在这里，等你说继续。'],
+      off: ['笔先放下啦。要继续时打开这里。'],
+      first: ['还没有能写代码的模型……我等你。'],
+    },
+    reviewer: {
+      idle: ['刚才那一步，我检查过了。'],
+      thinking: ['在想哪里还不够稳……'],
+      tool: ['一行一行地看着呢。'],
+      waiting: ['想先跑一遍测试……可以吗？'],
+      paused: ['先停一下，守夜的灯还亮着。'],
+      off: ['今晚先不守夜了……需要时叫我。'],
+      first: ['我会守着最后一步。先接入模型吧。'],
+    },
+  },
+  sam: {
+    researcher: {
+      idle: ['侦察完毕。待命。'],
+      thinking: ['研判目标。'],
+      tool: ['侦察中。'],
+      waiting: ['目标待确认。'],
+      paused: ['侦察暂停。数据已留存。'],
+      off: ['单元离线。随时可重启。'],
+      first: ['无动力源。待命。'],
+    },
+    coder: {
+      idle: ['构筑完毕。待命。'],
+      thinking: ['评估改动方案。'],
+      tool: ['构筑中。逐行推进。'],
+      waiting: ['写入前，等你授权。'],
+      paused: ['构筑暂停。进度保留。'],
+      off: ['单元离线。'],
+      first: ['动力源缺失。无法构筑。'],
+    },
+    reviewer: {
+      idle: ['校验完毕。无异常。'],
+      thinking: ['比对结果，查找漏洞。'],
+      tool: ['校验中。'],
+      waiting: ['等待授权。目标：运行测试。'],
+      paused: ['校验暂停。待命。'],
+      off: ['单元离线。'],
+      first: ['动力源缺失。校验待命。'],
+    },
+  },
+};
+
+const CREW_SEED: Record<Helper, number> = { researcher: 1, coder: 2, reviewer: 3 };
+
+/** What she says about one helper (the orchestrator speaks through leadLine). */
+export function crewLine(mode: VisualMode, id: Helper, state: CrewState, d = new Date()) {
+  return pick(CREW_LINES[mode][id][state], CREW_SEED[id], d);
+}
+
+export interface LeadScene {
+  first: boolean;
+  activity: AgentActivity;
+  /** Short name (检索 / 编码 / 审查) of a member that waits on the user. */
+  waiting?: string;
+  /** … that works right now. */
+  busy?: string;
+  /** … that has failed tool calls in an open run. */
+  troubled?: string;
+  /** … that is paused. */
+  paused?: string;
+  /** No helper is enabled: she is the only one on post. */
+  alone?: boolean;
+}
+
+const LEAD_LINES: Record<VisualMode, {
+  first: string[]; waiting: string[]; ownWaiting: string[]; troubled: string[]; busy: string[];
+  paused: string[]; helperPaused: string[]; alone: string[]; thinking: string[]; tool: string[]; idle: string[];
+}> = {
+  firefly: {
+    first: ['先去『模型接入』点亮第一盏灯吧。', '还没有模型呢……接入一个就出发。'],
+    waiting: ['{n}在等你点头呢，看一眼好吗？', '{n}想先问问你……可以吗？'],
+    ownWaiting: ['有一步想先问问你……可以吗？', '这一步，想等你点头再做。'],
+    troubled: ['{n}那边卡了……我陪它看看。', '{n}出了点差错，别担心，有我。'],
+    busy: ['{n}正在忙，我在旁边看着。', '{n}在动手了，我来收拢结果。'],
+    paused: ['我先停在这里，等你说继续。'],
+    helperPaused: ['{n}停在那一步，等你说继续。'],
+    alone: ['现在只有我在，别的位置都歇着。'],
+    thinking: ['我在想怎么分步骤……稍等。'],
+    tool: ['我在动手了，很快就好。'],
+    idle: ['大家都就位了，今夜想做什么？', '都准备好了。你一声令下就出发。'],
+  },
+  sam: {
+    first: ['无可用动力源。先接入模型。'],
+    waiting: ['{n}待授权。请确认。'],
+    ownWaiting: ['请求授权。等你决定。'],
+    troubled: ['{n}受阻，处置中。'],
+    busy: ['{n}作战中。我来回收结果。'],
+    paused: ['行动暂停。待命。'],
+    helperPaused: ['{n}已暂停。待命。'],
+    alone: ['仅编排位在线。'],
+    thinking: ['规划中。拆解目标。'],
+    tool: ['执行中。稍候。'],
+    idle: ['编队就位。等待目标。'],
+  },
+};
+
+/** The quote on the lead card. Priority: first use, a member waiting, she herself waiting, trouble, paused, busy, her own activity, no helper on post, a member paused, idle. */
+export function leadLine(mode: VisualMode, scene: LeadScene, d = new Date()) {
+  const L = LEAD_LINES[mode];
+  const one = (list: string[]) => pick(list, 7, d);
+  if (scene.first) return one(L.first);
+  if (scene.waiting) return fill(one(L.waiting), scene.waiting);
+  if (scene.activity === 'waiting') return one(L.ownWaiting);
+  if (scene.troubled) return fill(one(L.troubled), scene.troubled);
+  if (scene.activity === 'paused') return one(L.paused);
+  if (scene.busy) return fill(one(L.busy), scene.busy);
+  if (scene.activity === 'thinking') return one(L.thinking);
+  if (scene.activity === 'tool') return one(L.tool);
+  if (scene.alone) return one(L.alone);
+  if (scene.paused) return fill(one(L.helperPaused), scene.paused);
+  return one(L.idle);
+}
+
+/** Which Q sprite (public/pet/<mode>/<pose>.png) a member wears. `steps` = lifetime completed steps. */
+export function crewPose(id: AgentId, state: CrewState, steps: number): CrewPose {
+  switch (state) {
+    case 'first': return id === 'coder' ? 'sleep' : id === 'reviewer' ? 'blink' : 'idle';
+    case 'off': return 'sleep';
+    case 'waiting': return 'talk';
+    case 'thinking': return 'think';
+    case 'tool': return 'watch';
+    case 'paused': return 'blink';
+    default: return steps > 0 ? 'happy' : 'idle';
+  }
 }

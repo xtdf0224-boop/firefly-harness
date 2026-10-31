@@ -1,6 +1,6 @@
 {
   "name": "firefly-harness",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "private": true,
   "description": "萤火 · Agent 工作台 — 以《崩坏：星穹铁道》流萤 / 萨姆为灵感的 AI Agent Harness 桌面工作台（非官方同人项目）",
   "type": "module",
@@ -9,11 +9,12 @@
     "build": "vite build",
     "preview": "vite preview --port 5318 --strictPort",
     "typecheck": "tsc --noEmit",
-    "verify": "tsc --noEmit && npm run check:unit && npm run check:net && npm run check:ui && npm run check:driver && vite build && node scripts/check-build.mjs",
+    "verify": "tsc --noEmit && npm run check:unit && npm run check:net && npm run check:ui && npm run check:driver && npm run check:pet && vite build && node scripts/check-build.mjs",
     "check:unit": "rolldown scripts/unit-check.ts --platform node --format esm --file node_modules/.cache/unit-check.mjs && node node_modules/.cache/unit-check.mjs",
     "check:net": "rolldown scripts/net-check.ts --platform node --format esm --file node_modules/.cache/net-check.mjs && node node_modules/.cache/net-check.mjs",
     "check:ui": "rolldown scripts/ui-check.ts --platform node --format esm --file node_modules/.cache/ui-check.mjs && node node_modules/.cache/ui-check.mjs",
     "check:driver": "rolldown scripts/driver-check.ts --platform node --format esm --file node_modules/.cache/driver-check.mjs && node node_modules/.cache/driver-check.mjs",
+    "check:pet": "rolldown scripts/pet-check.ts --platform node --format esm --file node_modules/.cache/pet-check.mjs && node node_modules/.cache/pet-check.mjs && rolldown scripts/pet-brain-check.ts --platform node --format esm --file node_modules/.cache/pet-brain-check.mjs && node node_modules/.cache/pet-brain-check.mjs",
     "legal": "rolldown scripts/gen-legal.ts --platform node --format esm --file node_modules/.cache/gen-legal.mjs && node node_modules/.cache/gen-legal.mjs",
     "app": "vite build && electron .",
     "dist:win": "npm run legal && npm run verify && electron-builder --win nsis portable"
@@ -59,6 +60,12 @@
     "asar": true,
     "asarUnpack": [
       "electron/ai/browser-mcp.cjs"
+    ],
+    "extraFiles": [
+      {
+        "from": "licenses",
+        "to": "licenses"
+      }
     ],
     "npmRebuild": false,
     "win": {

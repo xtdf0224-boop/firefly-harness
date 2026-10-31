@@ -403,6 +403,46 @@ export interface Settings {
   lifeMood: boolean;
   /** In a quiet chat she may say something on her own (max twice in a row). */
   lifeNudge: boolean;
+  /** 桌宠 (docs/PET.md). */
+  pet: PetSettings;
+}
+
+export type PetProactivity = 'off' | 'low' | 'normal' | 'high';
+export type PetVoiceProvider = 'elevenlabs' | 'minimax' | 'edge';
+/** The speech model per keyed service (the API model id); '' = the recommended one. Kept per service so switching back keeps it. */
+export type PetVoiceModels = { elevenlabs: string; minimax: string };
+
+export interface PetSettings {
+  /** Show the pet window. */
+  enabled: boolean;
+  /** Let her look at the foreground game window on this PC (frames stay local unless sent with a question). */
+  watch: boolean;
+  /** How often she speaks up on her own; 'normal' = now and then. */
+  proactivity: PetProactivity;
+  /** Minimum seconds between two lines she starts herself. */
+  cooldownSec: number;
+  /** At most this many screenshots sent to a model per hour. */
+  imagesPerHour: number;
+  /** API model that looks at screenshots; unset = the cheapest connected vision model. */
+  vision?: AgentEngine;
+  /** CLI model for questions that need the web (攻略、配装); unset = a logged-in Claude Code / Codex. */
+  web?: AgentEngine;
+  voice: { enabled: boolean; provider: PetVoiceProvider; voiceId: string; volume: number; fallback: boolean; models: PetVoiceModels };
+  hotkeyAsk: string;
+  hotkeyPause: string;
+  /** Programs she never looks at (lower-case exe names). */
+  neverWatch: string[];
+  /** Programs the user marked as games she may watch. */
+  gameAllow: string[];
+  /** Programs the user marked as chat only (added to the built-in anti-cheat list). */
+  gameDeny: string[];
+  /** 实时陪玩 (docs/PET.md §7): she listens on the microphone and answers aloud.
+   *  listen: 'auto' = whenever the user talks; 'key' = the 呼出 hotkey starts one sentence (for speakers / noisy games).
+   *  sensitivity 0–100: how quiet speech may be to count. fastVoice: ElevenLabs Flash v2.5 for her replies (she starts
+   *  talking sooner). autoOffMin: ends by itself after this many minutes without the user talking. */
+  realtime: { listen: 'auto' | 'key'; sensitivity: number; fastVoice: boolean; autoOffMin: number };
+  /** Size on screen, 0.6–1.6. */
+  scale: number;
 }
 
 /** Serializable UI commands, so engine-made toasts can carry an action without importing the UI. */

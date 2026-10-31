@@ -22,6 +22,11 @@ SOFTWARE.
 
 This license applies to the source code only. Third-party assets bundled with
 the app (the wallpapers in public/wallpapers and the boot clips in public/boot)
-and the character fan art (the installer art in build/installer and the theme
-cursors in build/cursors, also inlined in src/styles/cursors.css) are NOT
-covered by this license; see DISCLAIMER.md.
+and the character fan art (the Q-version pet art in public/pet, the installer
+art in build/installer and the theme cursors in build/cursors, also inlined in
+src/styles/cursors.css) are NOT covered by this license; see DISCLAIMER.md.
+
+One source file is not covered by the MIT license either:
+electron/pet/tts-edge-gec.cjs is a JavaScript port of code from edge-tts
+(https://github.com/rany2/edge-tts) and stays under the GNU Lesser General
+Public License v3.0 (LGPL-3.0-only); see licenses/edge-tts-NOTICE.txt.

@@ -5,11 +5,11 @@
 import { produce } from 'immer';
 import { EFFORT_LABEL, type Effort } from '../lib/effort';
 import { PROVIDER_BY_ID } from '../lib/providers';
-import type { AgentEngine, AppState, Message, Run, Settings, ToolId } from '../lib/types';
+import type { AgentEngine, AppState, Message, PetSettings, Run, Settings, ToolId } from '../lib/types';
 import { pauseRun, toast } from './engine';
 import { normalizeAfterLoad } from './live';
 import { restoreModels } from './models';
-import { DEFAULT_SETTINGS, emptyState, syncPersonaAgent } from './seed';
+import { DEFAULT_PET, DEFAULT_SETTINGS, emptyState, syncPersonaAgent } from './seed';
 import { store } from './store';
 
 const KEY = 'firefly-harness/v1';
@@ -53,8 +53,54 @@ function pickSettings(raw: unknown): Partial<Settings> {
       const v = (raw as Loose)[key];
       if (typeof v === typeof def) out[key] = v;
     }
+    if ('pet' in out) out.pet = pickPet(out.pet);
   }
   return out as Partial<Settings>;
+}
+
+const ONE_OF = <T extends string>(v: unknown, allowed: readonly T[], def: T): T => (allowed.includes(v as T) ? v as T : def);
+const NUM = (v: unknown, lo: number, hi: number, def: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : def);
+const STR = (v: unknown, def: string, max = 200) => (typeof v === 'string' ? v.slice(0, max) : def);
+/** A speech model id (eleven_v3, speech-2.8-hd); anything else means the recommended one. */
+const MODEL = (v: unknown) => (typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(v) ? v : '');
+const NAMES = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').map((x) => x.trim().toLowerCase()).filter(Boolean).slice(0, 200) : []);
+
+/** 桌宠 settings: every field checked against its default, so an old or hand-edited save cannot break the pet. */
+function pickPet(raw: unknown): PetSettings {
+  const d = DEFAULT_PET;
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Loose;
+  const v = (r.voice && typeof r.voice === 'object' ? r.voice : {}) as Loose;
+  const vm = (v.models && typeof v.models === 'object' ? v.models : {}) as Loose;
+  const rt = (r.realtime && typeof r.realtime === 'object' ? r.realtime : {}) as Loose;
+  return {
+    enabled: typeof r.enabled === 'boolean' ? r.enabled : d.enabled,
+    watch: typeof r.watch === 'boolean' ? r.watch : d.watch,
+    proactivity: ONE_OF(r.proactivity, ['off', 'low', 'normal', 'high'] as const, d.proactivity),
+    cooldownSec: NUM(r.cooldownSec, 60, 3600, d.cooldownSec),
+    imagesPerHour: NUM(r.imagesPerHour, 0, 240, d.imagesPerHour),
+    vision: validEngine(r.vision),
+    web: validEngine(r.web),
+    voice: {
+      enabled: typeof v.enabled === 'boolean' ? v.enabled : d.voice.enabled,
+      provider: ONE_OF(v.provider, ['elevenlabs', 'minimax', 'edge'] as const, d.voice.provider),
+      voiceId: STR(v.voiceId, d.voice.voiceId),
+      volume: NUM(v.volume, 0, 100, d.voice.volume),
+      fallback: typeof v.fallback === 'boolean' ? v.fallback : d.voice.fallback,
+      models: { elevenlabs: MODEL(vm.elevenlabs), minimax: MODEL(vm.minimax) },
+    },
+    hotkeyAsk: STR(r.hotkeyAsk, d.hotkeyAsk, 40),
+    hotkeyPause: STR(r.hotkeyPause, d.hotkeyPause, 40),
+    neverWatch: NAMES(r.neverWatch),
+    gameAllow: NAMES(r.gameAllow),
+    gameDeny: NAMES(r.gameDeny),
+    realtime: {
+      listen: ONE_OF(rt.listen, ['auto', 'key'] as const, d.realtime.listen),
+      sensitivity: NUM(rt.sensitivity, 0, 100, d.realtime.sensitivity),
+      fastVoice: typeof rt.fastVoice === 'boolean' ? rt.fastVoice : d.realtime.fastVoice,
+      autoOffMin: NUM(rt.autoOffMin, 5, 120, d.realtime.autoOffMin),
+    },
+    scale: NUM(r.scale, 0.6, 1.6, d.scale),
+  };
 }
 
 /** An agent's saved model, if it still names a vendor, a way (`claude:cli`) and a known effort. */

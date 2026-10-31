@@ -12,6 +12,7 @@ import { DEFAULT_SETTINGS } from '../../state/seed';
 import { version as APP_VERSION } from '../../../package.json';
 import { ModePicker } from './config/ModePicker';
 import { ViewHeader } from './config/ViewHeader';
+import { PetSettingsPanel } from './settings/PetSettings';
 
 const MOTION_OPTIONS: Array<{ value: MotionPref; label: string }> = [
   { value: 'system', label: '跟随系统' },
@@ -155,6 +156,8 @@ export function SettingsView() {
               </SettingRow>
             </div>
           </Panel>
+
+          <PetSettingsPanel />
 
           <Panel className="settings-span" label="条款" title="免责声明与使用条款" icon={FileText} energy id="terms">
             <p className="settings-terms__lead">使用本软件前，请阅读并理解以下条款。</p>

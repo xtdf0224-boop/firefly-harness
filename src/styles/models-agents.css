@@ -1,7 +1,7 @@
 /* 萤火 · models-agents.css
    The parts of 模型接入 and the Agent page that are built on the menu select: the default-vendor row,
-   the model / 推理强度 fields on a vendor card, and the model picker, notes and tool toggles on an Agent
-   card. Tokens only; SAM (square corners, firefly green) is under :root[data-mode="sam"].
+   the model / 推理强度 fields on a vendor card, and the notes and tool toggles in the Agent page's loadout
+   drawer. Tokens only; SAM (square corners, firefly green) is under :root[data-mode="sam"].
    New class names on purpose: this file loads before views-live.css / views-config.css. */
 
 /* ───────────── 模型接入 · 新建时默认使用 ───────────── */
@@ -33,7 +33,7 @@
 }
 .model-field__static svg { flex: none; }
 
-/* ───────────── Agent card · model, notes ───────────── */
+/* ───────────── Agent loadout drawer · model, notes ───────────── */
 .agent-follow {
   display: flex;
   align-items: flex-start;
@@ -67,7 +67,7 @@
 .agent-warn > svg { flex: none; color: var(--tone-warning); }
 .agent-warn > span { flex: 1 1 14em; min-width: 0; }
 
-/* ───────────── Agent card · tool toggles ───────────── */
+/* ───────────── Agent loadout drawer · tool toggles ───────────── */
 .agent-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .agent-tool {
   display: inline-flex;

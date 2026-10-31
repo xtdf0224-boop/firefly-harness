@@ -9,6 +9,7 @@ const { spawn } = require('node:child_process');
 const secrets = require('./secrets.cjs');
 const { resolveCommand, forgetCommand, installDirs, runOnce, isWin, spawnCli, killTree, expandVars, SYS32, cmdExe } = require('./proc.cjs');
 const { streamOpenAI, streamAnthropic } = require('./api.cjs');
+const { checkParts } = require('./parts.cjs');
 const { runClaude } = require('./claude.cjs');
 const { runCodex } = require('./codex.cjs');
 const { runAcp } = require('./acp.cjs');
@@ -168,7 +169,12 @@ function startStream(sender, spec) {
   const provider = String(spec.provider || '');
   if (!secrets.PROVIDERS.has(provider)) return fail('未知的模型服务。');
 
-  if (spec.driver === 'api-openai' || spec.driver === 'api-anthropic') {
+  const isApiDriver = spec.driver === 'api-openai' || spec.driver === 'api-anthropic';
+  const parts = checkParts(spec.messages);
+  if (parts.error) return fail(parts.error);
+  if (parts.arrays && !isApiDriver) return fail('命令行方式的模型不能接收图片，请改用 API 方式的视觉模型。');
+
+  if (isApiDriver) {
     const baseUrl = safeBaseUrl(spec.baseUrl);
     if (!baseUrl) return fail('服务地址必须是 https:// 开头。');
     const key = secrets.get(provider);
@@ -293,7 +299,7 @@ function codexModels(exe) {
     });
     child.on('error', () => finish(null));
     child.on('close', () => finish(null));
-    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name: 'FireflyHarness', title: '萤火', version: '2.0.0' } } });
+    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name: 'FireflyHarness', title: '萤火', version: '2.1.0' } } });
   });
 }
 
