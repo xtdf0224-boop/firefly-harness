@@ -191,6 +191,12 @@ const BROWSER_NOTE = '\n\n## 浏览器\n你可以用 firefly-browser 的 browser
 
 /** What a 只读 task may never do. */
 const READ_ONLY_BLOCK = new Set<ToolId>(['write_file', 'shell', 'git', 'browser_act']);
+
+/** The three gates on a workbench tool: switched off in 工具与技能, blocked in a 只读 task, not in the Agent's own list (`only`;
+    'other' is never held by it). apiToolsFor, policySpec and stepToolsOf share it, so the plan roster cannot drift from them. */
+function toolBlocked(id: ToolId, readOnly: boolean, only?: ToolId[]) {
+  return s().tools.find((t) => t.id === id)?.permission === 'off' || (readOnly && READ_ONLY_BLOCK.has(id)) || (!!only && id !== 'other' && !only.includes(id));
+}
 /** Claude Code already reads inside its folders (cwd + --add-dir) without asking; leaving these out of
     --allowedTools makes a read anywhere else come back as a permission request. */
 const CLAUDE_READS = new Set(['Read', 'NotebookRead', 'Grep', 'Glob', 'LS']);
@@ -206,16 +212,15 @@ function policySpec(spec: StartSpec, engine: TaskEngine, access: 'chat' | 'work'
   const deny = new Set<string>(CLAUDE_HEADLESS_DENY);
   for (const t of tools) {
     const names = CLAUDE_TOOLS[t.id] ?? [];
-    const blocked = t.permission === 'off' || (readOnly && READ_ONLY_BLOCK.has(t.id)) || (!!only && t.id !== 'other' && !only.includes(t.id));
-    if (blocked) names.forEach((n) => deny.add(n));
+    if (toolBlocked(t.id, readOnly, only)) names.forEach((n) => deny.add(n));
     else if (t.permission === 'auto') names.filter((n) => !CLAUDE_READS.has(n)).forEach((n) => allow.add(n));
   }
   spec.allow = [...allow];
   spec.deny = [...deny];
-  const writeOff = tools.find((t) => t.id === 'write_file')?.permission === 'off' || (!!only && !only.includes('write_file'));
+  const writeOff = toolBlocked('write_file', false, only);
   const cfg = s().models.providers[engine.provider];
   spec.sandbox = readOnly || writeOff ? 'read-only' : cfg.codexSandbox === 'danger-full-access' ? 'danger-full-access' : 'workspace-write';
-  spec.webSearch = tools.find((t) => t.id === 'web_search')?.permission !== 'off' && (!only || only.includes('web_search'));
+  spec.webSearch = !toolBlocked('web_search', false, only);
   return spec;
 }
 
@@ -740,23 +745,39 @@ function unreadBack(taskId: string, runId: string, n: number, how: 'done' | 'err
 /** What the user added to the task after its goal, one line each (planPrompt and briefing both carry it). */
 const supplements = (task: Task) => task.messages.filter((m) => m.role === 'user' && m.text !== task.goal).map((m) => `- ${m.text}`).join('\n');
 
-/** `act`: the planning model can look around the working folder (canAct) — it is also told which helpers can work in it. */
+/** `act`: the planning model can look around the working folder (canAct) — it is also told which helpers can work in it, and with
+    which tools each one's steps will run (stepToolsOf), so a step that needs a tool goes to an Agent that has it. */
 function planPrompt(task: Task, run: Run | undefined, act: boolean) {
   const st = s();
   const ids = rosterOf(task);
+  const kit = new Map(ids.map((id) => [id, stepToolsOf(task, run, id)] as const));
+  const toolText = (id: AgentId) => {
+    const tools = kit.get(id);
+    if (!tools) return '';
+    return tools.length ? `执行时能用的工具：${tools.map((t) => st.tools.find((x) => x.id === t)?.name ?? t).join('、')}` : '执行时没有可用的工具，只能思考和写作';
+  };
+  const solo = ids.length <= 1 ? toolText('orchestrator') : '';
   const roster = ids.length <= 1
-    ? `- orchestrator：你自己（这次由你一个人${act ? '在工作文件夹里' : ''}完成全部步骤）`
+    ? `- orchestrator：你自己（这次由你一个人${act ? '在工作文件夹里' : ''}完成全部步骤${solo ? `；${solo}` : ''}）`
     : ids.map((id) => {
       const a = st.agents.find((x) => x.id === id);
       const own = run?.agentEngines?.[id];
       const how = id === 'orchestrator' ? '你自己' : own ? `用 ${own.label}${actsIn(own, 'work', run) ? '，能在工作文件夹里动手' : '，只能思考和写作，不能动文件'}` : act ? '由你以这个角色完成' : '';
-      return `- ${id}：${a?.name ?? id}，${a?.role ?? ''}${how ? `（${how}）` : ''}`;
+      const note = [how, toolText(id)].filter(Boolean).join('；');
+      return `- ${id}：${a?.name ?? id}，${a?.role ?? ''}${note ? `（${note}）` : ''}`;
     }).join('\n');
+  // The rule only means something when some Agent lists a tool.
+  const listed = [...kit.values()].filter((tools): tools is ToolId[] => !!tools?.length);
+  const browserNamed = listed.some((tools) => tools.some(isBrowserTool));
+  const assign = ids.length > 1 && listed.length
+    ? `每一步执行时只能用分派到的那个 Agent 能用的工具${browserNamed ? '（「浏览网页」「操作网页」指萤火浏览器）' : ''}：需要某个工具的步骤，请派给列出了这个工具的 Agent。`
+    : '';
   const extras = supplements(task);
   return [
     `任务目标：\n${task.goal}`,
     extras ? `补充说明：\n${extras}` : '',
     `可以分派的 Agent：\n${roster}`,
+    assign,
     '请先用你的口吻说一两句话（不超过 60 字），然后给出 2 到 6 步的执行计划，放在一个 ```json 代码块里，格式：',
     '{"steps":[{"title":"不超过 14 个字","detail":"一句话：这一步做什么、产出什么","agent":"orchestrator"}]}',
     act ? '你可以先只读地了解一下工作文件夹里的情况，但这一轮不要修改任何文件，也不要开始执行。' : '这一轮只做计划，不要开始执行。',
@@ -813,19 +834,17 @@ function stepPrompt(run: Run, i: number, extras: string[], act: boolean) {
 
 /** The workbench's own tools an API model may be given, in a fixed order. Never 'other': that is a command-line agent's own extras. */
 const API_TOOLS: ToolId[] = ['read_file', 'code_search', 'write_file', 'shell', 'git', 'web_search', 'web_fetch', 'browser_read', 'browser_act'];
+const isBrowserTool = (id: ToolId) => id === 'browser_read' || id === 'browser_act';
 
 /** The tool categories an API turn gets (docs/API-TOOLS.md §7): none that 工具与技能 disables, no write in a 只读 task, only the
     agent's own picks (`own`), the browser only when the task opened it. The plan turn may only look: read_file and code_search. */
 export function apiToolsFor(engine: TaskEngine, purpose: PromptPurpose, own?: ToolId[]): ToolId[] {
-  const policy = s().tools;
   const readOnly = engine.access === 'read';
   const browser = browserOn(engine);
   return API_TOOLS.filter((id) => {
-    if (policy.find((t) => t.id === id)?.permission === 'off') return false;
-    if (readOnly && READ_ONLY_BLOCK.has(id)) return false;
-    if (own && !own.includes(id)) return false;
+    if (toolBlocked(id, readOnly, own)) return false;
     if (purpose === 'plan') return id === 'read_file' || id === 'code_search';
-    return browser || (id !== 'browser_read' && id !== 'browser_act');
+    return browser || !isBrowserTool(id);
   });
 }
 
@@ -896,6 +915,41 @@ const toolsOf = (agent: AgentId): ToolId[] | undefined => {
   const a: Agent | undefined = s().agents.find((x) => x.id === agent);
   return agent === 'orchestrator' || !a ? undefined : a.tools;
 };
+
+/** The tool categories a step of `agent` really has in this run, by what stepTurn starts it with: on its own model (Agent page) or
+    the task's. An API model gets apiToolsFor(…, 'step', its list). A command-line one has what its driver enforces (the Agent page's
+    note says the same). Claude Code and the ACP agents keep every gate (allow / deny lists, a question per call), but there git needs
+    the command tool: Claude Code's bare Bash / PowerShell deny takes Bash(git:*) with it, and an ACP agent's question may come without
+    the command text (Kimi Code sends it only in a later update), so its git is judged as a command. Codex follows only its sandbox and
+    the web-search switch: its shell reads and searches anyway, git works only where the sandbox can write (.git is written), it has no
+    fetch tool, and the firefly-browser MCP server is all or nothing. DeepSeek Harness follows none of them: only its read-only mode in
+    a 只读 task, and it takes no browser. When unsure, a tool is left out: the roster may understate, never promise.
+    null: the step cannot act at all (it only thinks and writes). The plan prompt lists these per Agent. */
+function stepToolsOf(task: Task, run: Run | undefined, agent: AgentId): ToolId[] | null {
+  const own = agent !== 'orchestrator' ? run?.agentEngines?.[agent] : undefined;
+  const engine = own ?? task.engine;
+  if (!engine || !actsIn(engine, 'work', run)) return null;
+  const only = toolsOf(agent);
+  if (isApi(engine)) return apiToolsFor(engine, 'step', only);
+  const readOnly = engine.access === 'read';
+  const driver = engine.driver ?? s().models.providers[engine.provider]?.driver;
+  // specFor's useBrowser: the MCP server is handed over when the task opened the browser and the Agent lists either browser tool.
+  const browser = browserOn(engine) && (!only || only.includes('browser_read') || only.includes('browser_act'));
+  if (driver === 'dsh') return API_TOOLS.filter((id) => !isBrowserTool(id) && !(readOnly && READ_ONLY_BLOCK.has(id)));
+  if (driver === 'codex') {
+    // policySpec's sandbox: read-only in a 只读 task or when the Agent may not write.
+    const canWrite = !readOnly && !toolBlocked('write_file', false, only);
+    return API_TOOLS.filter((id) => {
+      if (isBrowserTool(id)) return browser;
+      if (id === 'write_file' || id === 'git') return canWrite;
+      if (id === 'web_search') return !toolBlocked('web_search', false, only);
+      if (id === 'web_fetch') return false;
+      return !(readOnly && READ_ONLY_BLOCK.has(id));
+    });
+  }
+  const out = API_TOOLS.filter((id) => !toolBlocked(id, readOnly, only) && (!isBrowserTool(id) || browser));
+  return out.includes('shell') ? out : out.filter((id) => id !== 'git');
+}
 
 /** The CLI session a turn runs in: 'task' (the task's own), an agent id (its own CLI model), or '' for API turns. */
 function sessionKey(run: Run, agent: AgentId, engine: TaskEngine): string {

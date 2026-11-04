@@ -632,6 +632,170 @@ export async function rendererChecks() {
     store.update((d: Any) => { d.skills = undefined; });
   }
 
+  section('The plan roster names the tools each Agent\'s steps will get');
+  {
+    const toolName = (tool: string) => (store.get().tools as Any[]).find((t) => t.id === tool).name as string;
+    const named = (tools: string[]) => tools.map(toolName).join('、');
+    const lineOf = (text: string, agent: string) => text.split('\n').find((l) => l.startsWith(`- ${agent}：`)) ?? '';
+    const planText = (spec: Any): string => (spec.messages ? spec.messages[0].content : spec.prompt);
+    const PLAN3 = '```json\n{"steps":[{"title":"写","detail":"写","agent":"orchestrator"},{"title":"查","detail":"查","agent":"researcher"},{"title":"审","detail":"审","agent":"reviewer"}]}\n```';
+    const plan3: Script = async (_spec, sid) => {
+      emit(sid, { type: 'text', text: `计划如下。\n${PLAN3}` });
+      emit(sid, { type: 'done', text: `计划如下。\n${PLAN3}`, final: `计划如下。\n${PLAN3}`, stopReason: 'stop' });
+    };
+    const ALL3: AgentId[] = ['orchestrator', 'researcher', 'reviewer'];
+    const sameAsSteps = (label: string, text: string) => {
+      for (const [agent, step] of [['orchestrator', specs[1]], ['researcher', specs[2]], ['reviewer', specs[3]]] as const) {
+        const want = step.tools ? `执行时能用的工具：${named(step.tools)}）` : '执行时没有可用的工具，只能思考和写作）';
+        expect(`${label}: the ${agent} line lists exactly the tools its step got`, lineOf(text, agent).includes(want), [lineOf(text, agent), want]);
+      }
+    };
+
+    reset();
+    script = { plan: plan3 };
+    let id = create('RS1', '名单 GOAL30', engineOf({ browser: true }), ALL3);
+    await doneRun(id);
+    let text = planText(specs[0]);
+    eq('the three steps ran on the Agents the plan named', runOf(id).plan.map((x: Any) => x.agentId), ALL3);
+    sameAsSteps('API with the browser', text);
+    expect('…the researcher has the browser, the reviewer neither the browser nor writing', lineOf(text, 'researcher').includes('浏览网页、操作网页') && !lineOf(text, 'reviewer').includes('浏览网页') && !lineOf(text, 'reviewer').includes('写入文件'));
+    expect('…and the planner is told to give a step to an Agent that has its tool, the browser named', text.includes('需要某个工具的步骤，请派给列出了这个工具的 Agent') && text.includes('「浏览网页」「操作网页」指萤火浏览器'));
+    expect('…the roster comes before the plan format', text.indexOf('可以分派的 Agent：') < text.indexOf('请派给列出了这个工具的 Agent') && text.indexOf('请派给列出了这个工具的 Agent') < text.indexOf('请先用你的口吻'));
+
+    reset();
+    script = { plan: plan3 };
+    id = create('RS2', '名单 GOAL31', engineOf({ access: 'read', browser: true }), ALL3);
+    await doneRun(id);
+    text = planText(specs[0]);
+    sameAsSteps('read-only', text);
+    expect('read-only: no Agent is said to write, run commands, use git or the browser', ['写入文件', '执行命令', 'Git 操作', '浏览网页', '操作网页', '指萤火浏览器'].every((w) => !text.includes(w)), text);
+
+    reset();
+    script = { plan: plan3 };
+    setTools((t) => (t === 'shell' ? 'off' : undefined));
+    const keep = [...(store.get().agents as Any[]).find((a) => a.id === 'researcher').tools];
+    store.update((d: Any) => { d.agents.find((a: Any) => a.id === 'researcher').tools = []; });
+    id = create('RS3', '名单 GOAL32', engineOf(), ALL3);
+    await doneRun(id);
+    text = planText(specs[0]);
+    sameAsSteps('a tool off, an Agent with none', text);
+    expect('a tool switched off in 工具与技能 is in nobody\'s list', !text.includes('执行命令') && lineOf(text, 'reviewer').includes('执行时能用的工具：读取文件、代码搜索）'), lineOf(text, 'reviewer'));
+    expect('an Agent with no tools of its own is said to only think and write, and its step runs without tools', lineOf(text, 'researcher').includes('执行时没有可用的工具，只能思考和写作') && specs[2].tools === undefined && specs[2].system.includes('## 没有可用的工具'), lineOf(text, 'researcher'));
+    store.update((d: Any) => { d.agents.find((a: Any) => a.id === 'researcher').tools = keep; });
+    setTools((t) => (t === 'shell' ? 'confirm' : undefined));
+
+    reset();
+    script = { plan: plan3 };
+    store.update((d: Any) => { d.agents.find((a: Any) => a.id === 'reviewer').engine = { key: 'qwen:api', model: 'qwen3.7-plus' }; });
+    id = create('RS4', '名单 GOAL33', engineOf({ browser: true }), ALL3);
+    await doneRun(id);
+    text = planText(specs[0]);
+    sameAsSteps('an Agent on its own API model', text);
+    expect('…its own model is named, then its tools', specs[3].provider === 'qwen' && lineOf(text, 'reviewer').includes('能在工作文件夹里动手；执行时能用的工具：'), lineOf(text, 'reviewer'));
+    store.update((d: Any) => { delete d.agents.find((a: Any) => a.id === 'reviewer').engine; });
+
+    reset();
+    script = { plan: plan3 };
+    const claudeEng = { kind: 'live', provider: 'claude', auth: 'cli', driver: 'claude-code', model: 'sonnet', label: 'Claude · Claude Code', cwd: work, browser: true };
+    id = create('RS5', '名单 GOAL34', claudeEng, ALL3);
+    await doneRun(id);
+    text = planText(specs[0]);
+    expect('command line: the orchestrator has all nine, the browser included', lineOf(text, 'orchestrator').includes(`执行时能用的工具：${named(['read_file', 'code_search', 'write_file', 'shell', 'git', 'web_search', 'web_fetch', 'browser_read', 'browser_act'])}）`), lineOf(text, 'orchestrator'));
+    expect('…the researcher its six with the browser, the reviewer its three', lineOf(text, 'researcher').includes('执行时能用的工具：读取文件、代码搜索、网页搜索、抓取网页、浏览网页、操作网页）') && lineOf(text, 'reviewer').includes('执行时能用的工具：读取文件、代码搜索、执行命令）'), [lineOf(text, 'researcher'), lineOf(text, 'reviewer')]);
+    expect('…and the browser reaches exactly the steps whose Agent lists it', specs[1].browser === true && specs[2].browser === true && specs[3].browser === false);
+    expect('…the reviewer\'s step denies the tools its line leaves out', specs[3].deny.includes('Write') && specs[3].deny.includes('Edit') && specs[3].deny.includes('WebFetch'), specs[3].deny);
+
+    // Claude Code with 执行命令 off: its bare Bash / PowerShell deny also takes git, so nobody is said to have Git 操作 either.
+    reset();
+    script = { plan: plan3 };
+    setTools((t) => (t === 'shell' ? 'off' : undefined));
+    const reviewerTools = [...(store.get().agents as Any[]).find((a) => a.id === 'reviewer').tools];
+    store.update((d: Any) => { d.agents.find((a: Any) => a.id === 'reviewer').tools = ['read_file', 'git']; });
+    id = create('RS5b', '名单 GOAL34b', claudeEng, ALL3);
+    await doneRun(id);
+    text = planText(specs[0]);
+    expect('Claude Code, 执行命令 off: no 执行命令 and no Git 操作 in the roster, and the steps deny Bash', !text.includes('执行命令') && !text.includes('Git 操作') && specs[1].deny.includes('Bash') && specs[1].deny.includes('PowerShell'), text);
+    expect('…an Agent that lists git but not the command tool has only its reads', lineOf(text, 'reviewer').includes('执行时能用的工具：读取文件）'), lineOf(text, 'reviewer'));
+
+    // Kimi Code (ACP) asks about every call, but its question may come without the command text, so a git command is judged as a
+    // command: with the command tool off, git is not promised either.
+    reset();
+    script = { plan: plan3 };
+    const kimiEng = { kind: 'live', provider: 'kimi', auth: 'cli', driver: 'kimi', model: 'kimi-k3', label: 'Kimi · Kimi Code', cwd: work, browser: true };
+    id = create('RS5c', '名单 GOAL34c', kimiEng, ALL3);
+    await doneRun(id);
+    text = planText(specs[0]);
+    expect('Kimi Code, 执行命令 off: no 执行命令 and no Git 操作 either; the git-only Agent has its reads', lineOf(text, 'reviewer').includes('执行时能用的工具：读取文件）') && !text.includes('执行命令') && !text.includes('Git 操作') && specs[0].driver === 'acp', lineOf(text, 'reviewer'));
+    expect('…the others keep what the gates leave them', lineOf(text, 'orchestrator').includes('执行时能用的工具：读取文件、代码搜索、写入文件、网页搜索、抓取网页、浏览网页、操作网页）'), lineOf(text, 'orchestrator'));
+    store.update((d: Any) => { d.agents.find((a: Any) => a.id === 'reviewer').tools = reviewerTools; });
+    setTools((t) => (t === 'shell' ? 'confirm' : undefined));
+
+    reset();
+    script = { plan: plan3 };
+    id = create('RS5d', '名单 GOAL34d', { ...claudeEng, access: 'read' }, ALL3);
+    await doneRun(id);
+    text = planText(specs[0]);
+    expect('Claude Code, 只读: nobody writes, runs commands, uses git or the browser', ['写入文件', '执行命令', 'Git 操作', '浏览网页', '操作网页'].every((w) => !text.includes(w)) && lineOf(text, 'orchestrator').includes('执行时能用的工具：读取文件、代码搜索、网页搜索、抓取网页）') && specs[1].deny.includes('Write') && specs[1].deny.includes('Bash'), text);
+
+    // Codex follows only its sandbox and the web-search switch; its shell reads, searches and runs git anyway; the browser is all or nothing.
+    reset();
+    script = { plan: plan3 };
+    const researcherTools = [...(store.get().agents as Any[]).find((a) => a.id === 'researcher').tools];
+    store.update((d: Any) => { d.agents.find((a: Any) => a.id === 'researcher').tools = ['read_file', 'browser_read']; });
+    const codexEng = { kind: 'live', provider: 'gpt', auth: 'cli', driver: 'codex', model: 'gpt-6-sol', label: 'GPT · Codex', cwd: work, browser: true };
+    id = create('RS5e', '名单 GOAL34e', codexEng, ALL3);
+    await doneRun(id);
+    text = planText(specs[0]);
+    expect('Codex: the orchestrator writes and searches the web, has no fetch tool, and has the browser', lineOf(text, 'orchestrator').includes('执行时能用的工具：读取文件、代码搜索、写入文件、执行命令、Git 操作、网页搜索、浏览网页、操作网页）') && specs[1].sandbox === 'workspace-write' && specs[1].webSearch === true && specs[1].browser === true, lineOf(text, 'orchestrator'));
+    expect('…an Agent that lists only 浏览网页 gets the whole browser and commands, but in a read-only sandbox neither writing nor git', lineOf(text, 'researcher').includes('执行时能用的工具：读取文件、代码搜索、执行命令、浏览网页、操作网页）') && specs[2].browser === true && specs[2].sandbox === 'read-only' && specs[2].webSearch === false, lineOf(text, 'researcher'));
+    expect('…the reviewer: reads and commands; no writing, git, web search or browser', lineOf(text, 'reviewer').includes('执行时能用的工具：读取文件、代码搜索、执行命令）') && specs[3].browser === false && specs[3].sandbox === 'read-only', lineOf(text, 'reviewer'));
+    store.update((d: Any) => { d.agents.find((a: Any) => a.id === 'researcher').tools = researcherTools; });
+
+    // DeepSeek Harness follows neither 工具与技能 nor the Agent page (only its read-only mode), and takes no browser.
+    reset();
+    script = { plan: plan3 };
+    setTools((t) => (t === 'shell' ? 'off' : undefined));
+    store.update((d: Any) => { d.agents.find((a: Any) => a.id === 'researcher').tools = []; });
+    const dshEng = { kind: 'live', provider: 'deepseek', auth: 'cli', driver: 'dsh', model: 'deepseek-flash', label: 'DeepSeek · DSH', cwd: work, browser: true };
+    id = create('RS6', '名单 GOAL35', dshEng, ALL3);
+    await doneRun(id);
+    text = planText(specs[0]);
+    const dshAll = '执行时能用的工具：读取文件、代码搜索、写入文件、执行命令、Git 操作、网页搜索、抓取网页）';
+    expect('DeepSeek Harness: every Agent can do everything but the browser, whatever its list or the policy says', ALL3.every((a) => lineOf(text, a).includes(dshAll)) && !text.includes('只能思考和写作'), text);
+    expect('…nobody is said to have the browser, and its steps get none', !text.includes('浏览网页') && !text.includes('指萤火浏览器') && specs.slice(1, 4).every((x: Any) => x.browser === false), text);
+    reset();
+    script = { plan: plan3 };
+    id = create('RS6b', '名单 GOAL35b', { ...dshEng, access: 'read' }, ALL3);
+    await doneRun(id);
+    text = planText(specs[0]);
+    expect('…in a 只读 task (its read-only mode): reads and the web only', ALL3.every((a) => lineOf(text, a).includes('执行时能用的工具：读取文件、代码搜索、网页搜索、抓取网页）')), text);
+    store.update((d: Any) => { d.agents.find((a: Any) => a.id === 'researcher').tools = researcherTools; });
+    setTools((t) => (t === 'shell' ? 'confirm' : undefined));
+    script = {};
+
+    // Every tool off: every Agent only thinks and writes, and the rule about tools is left out.
+    reset();
+    setTools(() => 'off');
+    id = create('RS6c', '名单 GOAL35c', engineOf(), ['orchestrator', 'reviewer']);
+    await doneRun(id);
+    text = planText(specs[0]);
+    expect('every tool off: each line says it only thinks and writes, and there is no rule about tools', lineOf(text, 'orchestrator').includes('执行时没有可用的工具，只能思考和写作') && lineOf(text, 'reviewer').includes('执行时没有可用的工具，只能思考和写作') && !text.includes('请派给列出了这个工具的 Agent'), text);
+    setTools(() => 'confirm');
+    setTools((t) => (t === 'read_file' || t === 'code_search' || t === 'web_search' || t === 'browser_read' ? 'auto' : undefined));
+
+    reset();
+    id = create('RS7', '名单 GOAL36', engineOf());
+    await doneRun(id);
+    text = planText(specs[0]);
+    expect('one Agent: its line lists its tools, and there is no assignment rule', lineOf(text, 'orchestrator').includes(`完成全部步骤；执行时能用的工具：${named(specs[1].tools)}）`) && !text.includes('请派给列出了这个工具的 Agent'), lineOf(text, 'orchestrator'));
+
+    reset();
+    id = create('RS8', '名单 GOAL37', engineOf({ cwd: undefined, access: undefined }), ['orchestrator', 'reviewer']);
+    await doneRun(id);
+    text = planText(specs[0]);
+    expect('a task that cannot act: no tool lists and no rule, as before', !text.includes('执行时') && !text.includes('请派给列出了这个工具的 Agent') && lineOf(text, 'reviewer') === '- reviewer：审查 Agent，运行测试、复核结论', text);
+  }
+
   section('The new-task hint: 只读 comes first');
   {
     const claude = { label: 'Claude Code', approvals: 'per-call' } as const;
