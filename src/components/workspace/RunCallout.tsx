@@ -43,7 +43,13 @@ const PAUSE_TEXT: Record<'user' | 'reload', string> = {
 
 /** What the model may do on its own, said the way this way of running really works. */
 function accessNote(engine: TaskEngine) {
-  if (engine.auth === 'api') return '用 API 方式时，结果只在对话里给出，不会改动文件或执行命令。';
+  if (engine.auth === 'api') {
+    // A task made before API models could act has no working folder: it stays think-and-write only.
+    if (!engine.cwd) return '这个任务没有工作文件夹，API 模型只在对话里给出结果，不会改动文件或执行命令。';
+    return engine.access === 'read'
+      ? '只读任务：API 模型读取和搜索工作文件夹里的内容（读工作文件夹和技能文件夹以外的位置会先问你），也可能联网搜索、抓取网页；不写文件、不执行命令。'
+      : 'API 模型用萤火自己的工具在工作文件夹里读写文件、执行命令，按「工具与技能」里的设置执行，需要确认的会先问你；读到的内容会发给模型服务商。';
+  }
   const driver = engine.driver && DRIVERS[engine.driver];
   if (!driver) return '';
   return driver.approvals === 'per-call'

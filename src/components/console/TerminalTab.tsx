@@ -1,28 +1,36 @@
-/* 终端输出 tab: what the run's command-line agent ran and printed, plus the workbench's own notes. */
+/* 终端输出 tab: what the run's agents ran and printed (command-line agents, and API models through the workbench's tools), plus the workbench's own notes. */
 import { Check, SquareTerminal } from 'lucide-react';
 import { memo, useMemo, type ReactNode } from 'react';
 import { timeOfDay } from '../../lib/format';
 import type { TerminalLine } from '../../lib/types';
+import { canAct } from '../../state/live';
 import { useApp } from '../../state/store';
 import { CopyButton, EmptyState } from '../ui';
 import { useFollowScroll, useRemembered } from './consoleHooks';
 
 const EMPTY_LINES: TerminalLine[] = [];
 
-/** How the run's models work: a command-line agent runs commands, an API call only talks. */
+/** How the run's models work: a command-line agent runs commands, an API model does through the workbench's tools when the task has a folder, otherwise it only talks. */
 const NOTE = {
   cli: '命令行 Agent 执行的命令与输出',
-  api: '这次运行通过 API 进行，不会执行命令；这里只显示系统消息',
+  both: '命令行 Agent 和 API 模型执行的命令与输出',
+  tools: 'API 模型用萤火的工具执行的命令与输出',
+  api: '这个任务没有工作文件夹，API 模型只思考和写作，不会执行命令；这里只显示系统消息',
+  noTools: '这个服务地址不支持工具调用，这次 API 模型只思考和写作，不会执行命令；这里只显示系统消息',
 };
 
 export function TerminalTab({ runId }: { runId?: string }) {
   const lines = useApp((s) => (runId ? s.runs[runId]?.terminal : undefined)) ?? EMPTY_LINES;
   const running = useApp((s) => (runId ? s.runs[runId]?.status === 'running' : false));
-  const way = useApp((s): 'cli' | 'api' | undefined => {
+  const way = useApp((s): keyof typeof NOTE | undefined => {
     const run = runId ? s.runs[runId] : undefined;
     if (!run) return undefined;
     const engines = [s.tasks[run.taskId]?.engine, ...Object.values(run.agentEngines ?? {})];
-    return engines.some((e) => e?.auth === 'cli') ? 'cli' : engines.some((e) => e?.auth === 'api') ? 'api' : undefined;
+    const cli = engines.some((e) => e?.auth === 'cli');
+    // A run that fell back to think-and-write (the address has no tool calls) runs no commands through the workbench.
+    const tools = !run.noTools && engines.some((e) => e?.auth === 'api' && canAct(e, 'work'));
+    const api = engines.some((e) => e?.auth === 'api');
+    return cli && tools ? 'both' : cli ? 'cli' : tools ? 'tools' : api ? (run.noTools ? 'noTools' : 'api') : undefined;
   });
 
   const [showTime, setShowTime] = useRemembered('term.time', false);

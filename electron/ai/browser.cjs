@@ -4,7 +4,10 @@
 // MCP stdio server they spawn), which calls back here over 127.0.0.1 with a random token.
 // The window is two views: a toolbar (browser-ui/bar.html: back, forward, reload, home, address bar)
 // and the page itself, which starts on browser-ui/start.html.
-const { app, BaseWindow, WebContentsView, ipcMain, session } = require('electron');
+// Outside Electron (a check script run by plain Node) `require('electron')` is only a path, or fails: nothing of it is
+// used then, and the address rules below still work.
+const electron = (() => { try { const e = require('electron'); return e && typeof e === 'object' ? e : {}; } catch { return {}; } })();
+const { app, BaseWindow, WebContentsView, ipcMain, session } = electron;
 const http = require('node:http');
 const crypto = require('node:crypto');
 const path = require('node:path');
@@ -22,19 +25,54 @@ let server = null;
 let endpoint = null; // { url, token }
 let queue = Promise.resolve();
 
-/** Loopback, private, link-local and similar hosts: the agent's browser never reaches them. */
+/** An IPv4 address (first two numbers) in a range an agent must not reach. */
+const privateV4 = (a, b) => a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254)
+  || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
+
+/** The eight 16-bit groups of an IPv6 literal (brackets already off), or null when it is not one. A dotted
+ *  IPv4 tail (::ffff:1.2.3.4) and a zone id (fe80::1%eth0) are understood; `::` and leading zeros too. */
+function ipv6Groups(host) {
+  let s = String(host || '').replace(/%.*$/, '');
+  if (!s.includes(':') || !/^[0-9a-f:.]+$/i.test(s)) return null;
+  const tail = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(s);
+  if (tail) {
+    const [a, b, c, d] = tail.slice(1).map(Number);
+    if (a > 255 || b > 255 || c > 255 || d > 255) return null;
+    s = `${s.slice(0, tail.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const halves = s.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] === '' ? [] : halves[0].split(':');
+  const rest = halves.length === 2 && halves[1] !== '' ? halves[1].split(':') : [];
+  if (halves.length === 1 ? head.length !== 8 : head.length + rest.length > 7) return null;
+  const all = halves.length === 1 ? head : [...head, ...Array(8 - head.length - rest.length).fill('0'), ...rest];
+  const groups = all.map((g) => (/^[0-9a-f]{1,4}$/i.test(g) ? parseInt(g, 16) : NaN));
+  return groups.some(Number.isNaN) ? null : groups;
+}
+
+/** An IPv6 address (eight groups) that is local, private, reserved, or carries one of those IPv4 addresses. */
+function privateV6(g) {
+  if (g.slice(0, 6).every((x) => x === 0)) return true; // ::/96: unspecified, loopback, IPv4-compatible (::7f00:1 is 127.0.0.1)
+  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return true; // ::ffff:0:0/96, IPv4-mapped
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return privateV4(g[6] >> 8, g[6] & 255); // 64:ff9b::/96, NAT64
+  if (g[0] === 0x2002) return privateV4(g[1] >> 8, g[1] & 255); // 2002::/16, 6to4: the IPv4 address follows the prefix
+  return (g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xffc0) === 0xfec0 || (g[0] & 0xff00) === 0xff00; // unique-local, link-local, site-local, multicast
+}
+
+/** Loopback, private, link-local and similar hosts: the agent's browser never reaches them. A name with no
+ *  dot (http://nas/) is a device on the local network, so it counts too. */
 function isPrivateHost(host) {
   const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (!h || h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal') || h === 'metadata.google.internal') return true;
   const v4 = h.replace(/^::ffff:/, '').match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
-    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254)
-      || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
+  if (v4) return privateV4(Number(v4[1]), Number(v4[2]));
+  if (h.includes(':')) {
+    if (h === '::' || h === '::1' || h.startsWith('::ffff:') || /^f[cd]/.test(h) || /^fe[89ab]/.test(h)) return true;
+    const groups = ipv6Groups(h);
+    return !groups || privateV6(groups); // not an address at all: never let it through
   }
-  if (h.includes(':')) return h === '::' || h === '::1' || h.startsWith('::ffff:') || /^f[cd]/.test(h) || /^fe[89ab]/.test(h);
   // Bare numbers (http://2130706433/) are IPv4 too.
-  return /^(0x[0-9a-f]+|\d+)$/.test(h);
+  return /^(0x[0-9a-f]+|\d+)$/.test(h) || !h.includes('.');
 }
 
 function blockedUrl(url) {
@@ -44,7 +82,15 @@ function blockedUrl(url) {
   } catch { return false; }
 }
 
-const PRIVATE_NOTE = '为了安全，萤火浏览器不会打开本机或内网地址（localhost、127.0.0.1、192.168.x.x 等）。';
+const PRIVATE_NOTE = '为了安全，萤火浏览器不会打开本机或内网地址（localhost、127.0.0.1、192.168.x.x、不带点的主机名等）。';
+
+/** Why an address an agent asked to open must not be opened, or null: written as a local address (blockedUrl), or a name
+ *  that this computer looks up to one (127.0.0.1.nip.io, localtest.me). Links, redirects and what a page loads are
+ *  judged by their text only (they cannot wait for a lookup). A lookup that fails or is slow counts for nothing. */
+async function navigationBlock(url) {
+  if (blockedUrl(url)) return PRIVATE_NOTE;
+  try { return await require('./tools/web.cjs').checkNameLocal(new URL(url).hostname); } catch { return null; }
+}
 
 function hardenSession() {
   const ses = session.fromPartition(PARTITION);
@@ -115,8 +161,9 @@ function goHome() {
   wc.loadFile(START).catch(() => {});
 }
 
-// Toolbar commands. Only the toolbar of the current window may send them.
-ipcMain.on('ffbar', (e, cmd, arg) => {
+// Toolbar commands. Only the toolbar of the current window may send them. (A check script loads this file in
+// plain Node, where `require('electron')` is just a path and `ipcMain` / `app` are undefined: no wiring then.)
+if (ipcMain) ipcMain.on('ffbar', (e, cmd, arg) => {
   if (!alive(bar) || e.sender !== bar.webContents) return;
   const wc = pageContents();
   if (!wc) return;
@@ -256,17 +303,88 @@ const centerJs = (ref) => `(() => {
   return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
 })()`;
 
-const focusJs = (ref, clear) => `(() => {
+// Page-script pieces shared by focusJs and focusedSecretJs (SNAPSHOT_JS and describeJs carry their own copy of `secret`):
+// a field that is never typed into, and where the keys would really go — through open shadow roots, and into a frame when
+// it is same-origin (one that cannot be looked into, a payment form say, is null).
+const PAGE_FOCUS_FNS = `
+  const secret = (el) => { if (!el || el.nodeType !== 1) return false; const ty = (el.type || '').toLowerCase(); const ac = (el.getAttribute('autocomplete') || '').toLowerCase(); return ty === 'password' || /(^|\\s)(cc-|one-time-code|current-password|new-password)/.test(ac); };
+  const deep = (a) => { while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement; return a; };
+  const isFrame = (a) => !!a && /^(IFRAME|FRAME|OBJECT|EMBED)$/.test(a.tagName || '');
+  const focused = (top) => {
+    let a = deep(top);
+    if (isFrame(a)) {
+      let doc = null;
+      try { doc = a.contentDocument; } catch (e) { doc = null; }
+      a = doc ? deep(doc.activeElement) : null;
+      if (isFrame(a)) a = null;
+    }
+    return a;
+  };`;
+
+// The check and the focus in one page script, for every agent (the command-line agents' MCP tool comes straight here):
+// the text goes wherever the focus is, so the focus must really land on this element or inside it (one that cannot take
+// focus leaves it where it was, perhaps in a password field), and neither the element nor what ends up focused may be a
+// password, card-number or one-time-code field. Clearing fires the page's input handlers, which may move the focus: the
+// landing is checked again after it. → 'ok' | 'missing' | 'secret' | 'unfocused'.
+const focusJs = (ref, clear) => `(() => {${PAGE_FOCUS_FNS}
   const el = document.querySelector('[data-ff-ref="${ref}"]');
-  if (!el) return false;
+  if (!el) return 'missing';
+  if (secret(el)) return 'secret';
+  const land = () => {
+    const top = document.activeElement;
+    if (!top || (top !== el && !el.contains(top))) return 'unfocused';
+    const a = focused(top);
+    if (!a) return 'unfocused';
+    return secret(a) ? 'secret' : a;
+  };
   el.scrollIntoView({ block: 'center' });
   el.focus();
-  if (${clear ? 'true' : 'false'}) {
-    if ('value' in el) { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); }
-    else if (el.isContentEditable) el.textContent = '';
+  const at = land();
+  if (typeof at === 'string') return at;
+  if (${clear ? 'true' : 'false'} && at.ownerDocument === document) {
+    if ('value' in at) { at.value = ''; at.dispatchEvent(new Event('input', { bubbles: true })); }
+    else if (at.isContentEditable) at.textContent = '';
+    const again = land();
+    if (typeof again === 'string') return again;
+    if (again !== at) return 'unfocused';
   }
-  return true;
+  return 'ok';
 })()`;
+
+// Whether the keys of browser_press would land in a field that is never typed into (or a frame that cannot be looked into).
+const focusedSecretJs = `(() => {${PAGE_FOCUS_FNS}
+  const top = document.activeElement;
+  if (!top) return false;
+  const a = focused(top);
+  return !a || secret(a);
+})()`;
+
+/** Keys that change what a field holds: never sent while a password, card or one-time-code field has the focus. */
+const EDIT_KEYS = new Set(['Space', 'Backspace', 'Delete']);
+
+// What the element with this ref really is, for the approval card: its own visible text first (a page can
+// set aria-label to anything), then the other names it has. `role` and `secret` follow SNAPSHOT_JS: keep the two in step.
+const describeJs = (ref) => `(() => {
+  const el = document.querySelector('[data-ff-ref="${ref}"]');
+  if (!el) return null;
+  const t = el.tagName.toLowerCase();
+  const ty = (el.type || '').toLowerCase();
+  const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+  const secret = ty === 'password' || /(^|\\s)(cc-|one-time-code|current-password|new-password)/.test(ac);
+  const r = el.getAttribute('role');
+  const bty = ty || 'text';
+  const role = r || (t === 'a' ? 'link' : t === 'button' || t === 'summary' ? 'button' : t === 'select' ? 'combobox' : t === 'textarea' || el.isContentEditable ? 'textbox'
+    : t === 'input' ? (bty === 'checkbox' ? 'checkbox' : bty === 'radio' ? 'radio' : ['submit', 'button', 'reset'].includes(bty) ? 'button' : 'textbox') : 'clickable');
+  // A field's own content is what the user typed (or will type): never its label.
+  const field = role === 'textbox' || role === 'combobox';
+  const own = field ? '' : t === 'input' ? (['submit', 'button', 'reset'].includes(bty) ? el.value : '') : (el.innerText || '');
+  const lab = el.labels && el.labels[0] ? el.labels[0].innerText : '';
+  const label = own || lab || el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder') || el.getAttribute('alt') || el.getAttribute('name') || '';
+  return { tag: t, role, label: String(label).slice(0, 400), type: ty, autocomplete: ac, secret };
+})()`;
+
+/** What the agent is told for a field that is never typed into (the same words as tools/browser-tools.cjs SECRET_REFUSAL). */
+const SECRET_REFUSAL = '不能替你在密码、银行卡或验证码输入框里输入。';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -316,7 +434,8 @@ async function run(tool, args) {
     case 'browser_navigate': {
       const url = String(args.url || '');
       if (!/^https?:\/\//i.test(url)) return fail('只能打开 http:// 或 https:// 开头的网址。');
-      if (blockedUrl(url)) return fail(PRIVATE_NOTE);
+      const blocked = await navigationBlock(url);
+      if (blocked) return fail(blocked);
       try { await within(wc.loadURL(url), 30000, '打开网页'); } catch (e) {
         if (e.code === 'TIMEOUT') { wc.stop(); return fail(`网页 30 秒还没打开，已停止加载：${url}`); }
         if (/ERR_BLOCKED_BY_CLIENT/.test(String(e.message))) return fail(PRIVATE_NOTE);
@@ -341,8 +460,10 @@ async function run(tool, args) {
     }
     case 'browser_type': {
       if (ref === null) return fail('需要 ref（先用 browser_snapshot 获取）。');
-      const ok = await js(wc, focusJs(ref, args.clear !== false));
-      if (!ok) return fail(`找不到 ref=${ref}，请重新 browser_snapshot。`);
+      const focus = await js(wc, focusJs(ref, args.clear !== false));
+      if (focus === 'secret') return fail(SECRET_REFUSAL);
+      if (focus === 'unfocused') return fail(`ref=${ref} 不能输入文字（焦点落不到它上面），请换一个输入框。`);
+      if (focus !== 'ok') return fail(`找不到 ref=${ref}，请重新 browser_snapshot。`);
       await within(wc.insertText(String(args.text ?? '').slice(0, 20000)), 10000, '输入文字');
       if (args.submit) { await press(wc, 'Enter'); await sleep(800); await waitLoad(wc, 15000); }
       return text(await snapshot(wc));
@@ -350,6 +471,7 @@ async function run(tool, args) {
     case 'browser_press': {
       const key = String(args.key || '');
       if (!KEYS.has(key)) return fail(`不支持的按键：${key}。可用：${[...KEYS].join(', ')}`);
+      if (EDIT_KEYS.has(key) && (await js(wc, focusedSecretJs))) return fail(SECRET_REFUSAL);
       await press(wc, key);
       await sleep(400);
       return text(await snapshot(wc));
@@ -390,6 +512,40 @@ const ACTION_LABEL = {
   browser_press: '按键', browser_scroll: '滚动', browser_back: '后退', browser_screenshot: '截图', browser_wait: '等待页面',
 };
 
+/** One action at a time, in order, and none may hold the queue for more than a minute: what the 127.0.0.1
+ *  bridge and the app's own API tools both go through. Never rejects (a failure is an `isError` result). */
+function runQueued(tool, args) {
+  const name = String(tool);
+  const job = queue.then(async () => {
+    setNote('agent', ACTION_LABEL[name] || '浏览');
+    try { return await within(run(name, args || {}), 60000, '这个浏览器动作'); } finally { setNote('agent', ''); }
+  }).catch((e) => fail(`浏览器出错：${e.message}`));
+  queue = job.catch(() => {});
+  return job;
+}
+
+// A page may put anything in a label: control and direction characters are shown as <U+202E> and the like, so the card cannot be spoofed.
+const ODD_CHARS = new RegExp(`[${[[0, 8], [11, 31], [127, 159], [0x200b, 0x200f], [0x2028, 0x202e], [0x2066, 0x2069], [0xfeff, 0xfeff]].map(([a, b]) => `${String.fromCharCode(a)}-${String.fromCharCode(b)}`).join('')}]`, 'g');
+const shown = (s) => String(s || '').replace(ODD_CHARS, (c) => `<U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}>`).replace(/\s+/g, ' ').trim().slice(0, 80);
+
+/**
+ * What the element with data-ff-ref = `ref` is, read from the page itself (not from what the model says it
+ * is): { tag, role, label, type, autocomplete, url, secret }, or null when there is no page or no such element.
+ * Does not open the window and does not wait in the action queue.
+ */
+async function describeRef(ref) {
+  const n = Number(ref);
+  const wc = pageContents();
+  if (!wc || !Number.isInteger(n) || n < 1) return null;
+  let info;
+  try { info = await js(wc, describeJs(n)); } catch { return null; }
+  if (!info || typeof info !== 'object') return null;
+  return {
+    tag: shown(info.tag), role: shown(info.role), label: shown(info.label), type: shown(info.type),
+    autocomplete: shown(info.autocomplete), url: wc.getURL(), secret: !!info.secret,
+  };
+}
+
 function startBridge() {
   if (endpoint) return Promise.resolve(endpoint);
   const token = crypto.randomBytes(24).toString('hex');
@@ -402,14 +558,7 @@ function startBridge() {
         let msg;
         try { msg = JSON.parse(body); } catch { res.writeHead(400); res.end(); return; }
         if (!msg || typeof msg !== 'object' || typeof msg.tool !== 'string') { res.writeHead(400); res.end(); return; }
-        // One action at a time, in order — and none may hold the queue for more than a minute.
-        const tool = String(msg.tool);
-        const job = queue.then(async () => {
-          setNote('agent', ACTION_LABEL[tool] || '浏览');
-          try { return await within(run(tool, msg.args || {}), 60000, '这个浏览器动作'); } finally { setNote('agent', ''); }
-        }).catch((e) => fail(`浏览器出错：${e.message}`));
-        queue = job.catch(() => {});
-        job.then((out) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(out)); });
+        runQueued(String(msg.tool), msg.args || {}).then((out) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(out)); });
       });
     });
     server.on('error', reject);
@@ -444,8 +593,12 @@ function shutdown() {
   endpoint = null;
 }
 
-app.on('before-quit', shutdown);
+if (app) app.on('before-quit', shutdown);
 
 const getEndpoint = () => endpoint;
 
-module.exports = { startBridge, getEndpoint, mcpLaunch, open, clearData, run, isPrivateHost, pageContents, toUrl };
+module.exports = {
+  startBridge, getEndpoint, mcpLaunch, open, clearData, run, runQueued, describeRef, SECRET_REFUSAL, isPrivateHost, ipv6Groups, pageContents, toUrl, navigationBlock,
+  // Exposed for scripts/apitools-check.ts.
+  _internals: { focusJs, focusedSecretJs, EDIT_KEYS },
+};

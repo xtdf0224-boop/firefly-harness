@@ -8,7 +8,10 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const secrets = require('./secrets.cjs');
 const { resolveCommand, forgetCommand, installDirs, runOnce, isWin, spawnCli, killTree, expandVars, SYS32, cmdExe } = require('./proc.cjs');
-const { streamOpenAI, streamAnthropic } = require('./api.cjs');
+const { streamOpenAI, streamAnthropic, toolProtocol } = require('./api.cjs');
+const { runAgent } = require('./agent.cjs');
+const workPaths = require('./tools/paths.cjs');
+const workTools = require('./tools/index.cjs');
 const { checkParts } = require('./parts.cjs');
 const { runClaude } = require('./claude.cjs');
 const { runCodex } = require('./codex.cjs');
@@ -158,7 +161,65 @@ function scrub(value, secret) {
 const streams = new Map(); // id → { ctl, sender }
 let streamSeq = 0;
 
+const TOOL_IDS = new Set(['read_file', 'write_file', 'shell', 'code_search', 'web_search', 'web_fetch', 'git', 'browser_read', 'browser_act', 'other']);
+
+/**
+ * An API run that works with the workbench's own tools (docs/API-TOOLS.md): only a 工作 turn that names tools. The work folder
+ * is checked here, before anything runs; the tools get the checked folder and the places they must keep away from.
+ * → null (no tools: a plain model call) | { error, code } | { ctx }
+ */
+function toolRun(spec, protocol) {
+  if (spec.access !== 'work' || !Array.isArray(spec.tools) || !spec.tools.length) return null;
+  const toolIds = [...new Set(spec.tools.filter((t) => TOOL_IDS.has(t)))];
+  if (!toolIds.length) return null;
+  const dir = checkDir(spec.cwd);
+  if (!dir) return { error: '工作文件夹不存在，请重新选择。', code: 'ENOENT' };
+  const cwd = path.resolve(dir);
+  const userData = app.getPath('userData');
+  const skillsRoot = skills.root();
+  const problem = workPaths.checkWorkFolder(cwd, { userData, skillsRoot });
+  if (problem) return { error: problem, code: 'CONFIG' };
+  let realCwd;
+  try { realCwd = fs.realpathSync.native(cwd); } catch { return { error: '工作文件夹不存在，请重新选择。', code: 'ENOENT' }; }
+  const ctx = {
+    cwd, realCwd, skillsRoot, userData,
+    readOnly: !!spec.readOnly,
+    tools: toolIds,
+    browser: !!spec.browser,
+    // Only the Anthropic and Responses interfaces take an image inside a tool result.
+    images: protocol !== 'openai',
+    confirmAll: !!spec.confirmAll,
+    shellOnlyGit: toolIds.includes('git') && !toolIds.includes('shell'),
+  };
+  return workTools.definitions(ctx).length ? { ctx } : null;
+}
+
+/** A page that reloads, crashes, navigates away or goes away leaves nobody to answer a question or read the result:
+ *  its runs end with it. Hooked once per page. */
+const watched = new WeakSet();
+function stopStreamsOf(sender) {
+  for (const s of [...streams.values()]) {
+    if (s.sender !== sender) continue;
+    try { s.ctl && s.ctl.stop(); } catch { /* gone */ }
+  }
+}
+function watchSender(sender) {
+  if (!sender || typeof sender.on !== 'function' || watched.has(sender)) return;
+  try { if (typeof sender.isDestroyed === 'function' && sender.isDestroyed()) return; } catch { return; }
+  watched.add(sender);
+  const stop = () => stopStreamsOf(sender);
+  sender.once('destroyed', stop);
+  sender.on('render-process-gone', stop);
+  // The event carries the details itself (Electron 44); the positional arguments are the older form.
+  sender.on('did-start-navigation', (e, ...old) => {
+    const mainFrame = e && typeof e.isMainFrame === 'boolean' ? e.isMainFrame : old[2] === true;
+    const sameDocument = e && typeof e.isSameDocument === 'boolean' ? e.isSameDocument : old[1] === true;
+    if (mainFrame && !sameDocument) stop();
+  });
+}
+
 function startStream(sender, spec) {
+  watchSender(sender);
   const id = `s${Date.now().toString(36)}${(++streamSeq).toString(36)}`;
   const emit = (ev) => { if (!sender.isDestroyed()) sender.send('ai:event', { id, ...ev }); };
   const entry = { ctl: null, sender };
@@ -180,10 +241,23 @@ function startStream(sender, spec) {
     const key = secrets.get(provider);
     if (!key) return fail('还没有保存这个服务的 API Key。');
     if (!spec.model) return fail('请先选择模型。');
+    const apiSpec = { ...spec, baseUrl, extraBody: cleanExtra(spec.extraBody) };
+    // A 工作 turn that names tools: the model works with the workbench's own tools (agent.cjs). Everything else, chat, the
+    // summary, the 桌宠 and the connection test, is a plain model call below.
+    const protocol = toolProtocol(apiSpec);
+    const work = toolRun(spec, protocol);
+    if (work && work.error) return fail(work.error, work.code);
+    if (work) {
+      // The key is never sent to the page, and neither is anything a command or a page printed that contains it.
+      const agent = runAgent({ spec: apiSpec, key, emit: (ev) => emit(scrub(ev, key)), protocol, ctx: work.ctx });
+      entry.ctl = { answer: agent.answer, send: agent.send, interrupt: agent.interrupt, stop: agent.stop };
+      agent.done.then(end, end);
+      return id;
+    }
     const ac = new AbortController();
     entry.ctl = { stop: () => ac.abort(), interrupt: () => ac.abort() };
     const run = spec.driver === 'api-openai' ? streamOpenAI : streamAnthropic;
-    run({ ...spec, baseUrl, extraBody: cleanExtra(spec.extraBody) }, key, emit, ac.signal)
+    run(apiSpec, key, emit, ac.signal)
       .then((r) => emit({ type: 'done', text: r.text, stopReason: r.stopReason }))
       .catch((e) => {
         if (e.code === 'ABORTED') emit({ type: 'done', text: '', stopReason: 'interrupted' });
@@ -299,7 +373,7 @@ function codexModels(exe) {
     });
     child.on('error', () => finish(null));
     child.on('close', () => finish(null));
-    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name: 'FireflyHarness', title: '萤火', version: '2.1.0' } } });
+    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name: 'FireflyHarness', title: '萤火', version: '2.2.0' } } });
   });
 }
 
@@ -434,7 +508,7 @@ function test(sender, spec) {
         else if (ev.type === 'done') resolve({ ok: true, text: (text || ev.text || '').trim().slice(0, 200), ms: Date.now() - started, model });
         else if (ev.type === 'error') resolve({ ok: false, error: ev.message, code: ev.code, ms: Date.now() - started });
       },
-    }, { ...spec, cwd, access: 'chat', sandbox: 'read-only', prompt: '连通性测试：请只回复两个字母 OK。', messages: [{ role: 'user', content: '连通性测试：请只回复两个字母 OK。' }], maxTokens: 64, system: '' });
+    }, { ...spec, cwd, access: 'chat', tools: undefined, confirmAll: undefined, sandbox: 'read-only', prompt: '连通性测试：请只回复两个字母 OK。', messages: [{ role: 'user', content: '连通性测试：请只回复两个字母 OK。' }], maxTokens: 64, system: '' });
     timer = setTimeout(() => {
       const s = streams.get(id);
       if (s && s.ctl) s.ctl.stop();
@@ -492,8 +566,8 @@ function register(host) {
   handle('ai:input', (_e, id, text) => {
     const s = streams.get(id);
     if (!s || !s.ctl || !s.ctl.send) return false;
-    s.ctl.send(String(text));
-    return true;
+    // The tool loop says false when it is over and nobody will read the text; the command-line drivers return nothing.
+    return s.ctl.send(String(text)) !== false;
   });
   handle('ai:answer', (_e, id, requestId, decision, input) => {
     const s = streams.get(id);

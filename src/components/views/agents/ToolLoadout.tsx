@@ -11,7 +11,7 @@ import { CrewOrb } from './parts';
 export const DENIED_TIP = '已在工具与技能中禁用';
 export const FOLLOW_TIP = '：不按 Agent 单独限制，只受「工具与技能」里的策略控制';
 
-export const CLI_NOTE = '命令行方式下按勾选限制：Claude Code 和 Kimi / Qwen / MiniMax Code 逐项遵守；Codex 只区分能否写文件和联网搜索；DeepSeek Harness 不受这里限制。API 方式不使用工具。';
+export const CLI_NOTE = '命令行方式下按勾选限制：Claude Code 和 Kimi / Qwen / MiniMax Code 逐项遵守；Codex 只区分能否写文件和联网搜索；DeepSeek Harness 不受这里限制。API 方式在带工作文件夹的工作任务里也按勾选限制（「其他工具」不提供）；闲聊和汇报不带工具。';
 
 export function ToolLoadout({ crew }: { crew: Crew }) {
   const helpers = crew.members.filter((m) => !m.lead);

@@ -1,6 +1,6 @@
 /* The desktop bridge (electron/preload.cjs). In the browser dev build it is absent and every model
    feature says so instead of pretending. Keys go in through saveKey and never come back. */
-import type { CliStatus, DriverId, ProviderId } from './types';
+import type { CliStatus, DriverId, ProviderId, Risk, ToolId } from './types';
 import type { PetBridge } from '../pet/contracts';
 
 /** One part of an API message: text, or an image (a screenshot for the 桌宠) as base64. */
@@ -15,12 +15,16 @@ export type StreamEvent =
   | { id: string; type: 'tool'; callId: string; name: string; input: Record<string, unknown>; title: string }
   | { id: string; type: 'tool-end'; callId: string; ok: boolean; output: string; exitCode?: number }
   | { id: string; type: 'plan'; entries: Array<{ text: string; status: 'pending' | 'in_progress' | 'completed' }> }
-  | { id: string; type: 'permission'; requestId: string; callId?: string; name: string; input: Record<string, unknown>; title: string; reason?: string; blockedPath?: string; paths?: string[] }
+  /** `mustAsk`: the desktop side wants the user to decide even when the policy says 自动执行 (API tools: protected
+   *  or sensitive files, a path through a link, a custom service address). `risk` overrides the tool's own risk. */
+  | { id: string; type: 'permission'; requestId: string; callId?: string; name: string; input: Record<string, unknown>; title: string; reason?: string; blockedPath?: string; paths?: string[]; mustAsk?: boolean; risk?: Risk }
   | { id: string; type: 'usage'; input: number; output: number; cached: number; total?: boolean; context?: number }
   | { id: string; type: 'notice'; text: string; level?: 'info' | 'warn' | 'error' }
   | { id: string; type: 'stdout'; text: string }
-  | { id: string; type: 'done'; text: string; stopReason?: string; sessionId?: string; costUsd?: number }
-  | { id: string; type: 'error'; message: string; code?: string; sessionId?: string };
+  /** `final` (API tool turns): the visible text of the last model call only, without the narration between tool calls.
+   *  `unread` (API tool turns, on done and error): how many of the supplements input() accepted the model never saw, the last ones sent. */
+  | { id: string; type: 'done'; text: string; final?: string; stopReason?: string; sessionId?: string; costUsd?: number; unread?: number }
+  | { id: string; type: 'error'; message: string; code?: string; sessionId?: string; unread?: number };
 
 export interface StartSpec {
   driver: 'api-openai' | 'api-anthropic' | DriverId | 'acp';
@@ -54,8 +58,15 @@ export interface StartSpec {
   keyEnv?: string;
   /** The run uses skills: Claude Code is allowed to read the skills folder. */
   skills?: boolean;
-  /** Attach the firefly-browser MCP server (浏览器控制). */
+  /** Attach the firefly-browser MCP server (浏览器控制). API tool turns: offer the browser tools. */
   browser?: boolean;
+  /* API work turns (docs/API-TOOLS.md) */
+  /** The workbench's own tools this turn may use, already filtered by policy, 只读 and the agent's list. Empty = none. */
+  tools?: ToolId[];
+  /** A custom service address: every tool call of this run asks the user. */
+  confirmAll?: boolean;
+  /** The model's context window (tokens): the tool loop winds down before it is full. */
+  contextLimit?: number;
 }
 
 /** What the tray menu or a notification asks the page to do. */

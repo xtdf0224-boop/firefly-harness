@@ -27,7 +27,7 @@ export function ToolsView() {
         <Info size={18} aria-hidden className="callout__icon" />
         <div className="callout__body">
           <p className="callout__text">
-            工具策略作用于所有任务里的命令行 Agent：它要用某个工具时，按这里的设置自动执行、先问你，或直接拒绝。Claude Code 和 Kimi / Qwen / MiniMax Code 逐项遵守；Codex 不能逐项确认，只按沙箱区分能否写文件和联网搜索；DeepSeek Harness 按它自己的权限设置执行。通过 API 接入的模型只思考和写作，不会调用工具。
+            工具策略作用于工作任务里的 Agent：它要用某个工具时，按这里的设置自动执行、先问你，或直接拒绝。命令行方式下，Claude Code 和 Kimi / Qwen / MiniMax Code 逐项遵守；Codex 不能逐项确认，只按沙箱区分能否写文件和联网搜索；DeepSeek Harness 按它自己的权限设置执行。通过 API 接入的模型在带工作文件夹的工作任务里用萤火自己的工具（读写文件、执行命令、抓取网页、搜索、浏览器），同样逐项遵守这里的设置；闲聊和最后的汇报不带工具。
           </p>
         </div>
       </div>

@@ -14,7 +14,7 @@ const TOOLS = [
   { name: 'browser_navigate', description: 'Open a web page (http/https) in the 萤火浏览器 window and return a snapshot of it.', inputSchema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } },
   { name: 'browser_snapshot', description: 'Read the current page: title, URL, the interactive elements with their refs, and the visible text. Call it again after the page changes.', inputSchema: { type: 'object', properties: {} } },
   { name: 'browser_click', description: 'Click an element by ref (from browser_snapshot). Returns a new snapshot.', inputSchema: { type: 'object', properties: { ref, element }, required: ['ref', 'element'] } },
-  { name: 'browser_type', description: 'Type text into an input / textarea / editable element by ref. Clears it first unless clear=false; submit=true presses Enter after typing.', inputSchema: { type: 'object', properties: { ref, element, text: { type: 'string' }, clear: { type: 'boolean' }, submit: { type: 'boolean' } }, required: ['ref', 'element', 'text'] } },
+  { name: 'browser_type', description: 'Type text into an input / textarea / editable element by ref. Clears it first unless clear=false; submit=true presses Enter after typing. Refuses password, card-number and one-time-code fields, and elements that cannot take focus.', inputSchema: { type: 'object', properties: { ref, element, text: { type: 'string' }, clear: { type: 'boolean' }, submit: { type: 'boolean' } }, required: ['ref', 'element', 'text'] } },
   { name: 'browser_press', description: 'Press a key in the page: Enter, Tab, Escape, Backspace, Delete, ArrowUp/Down/Left/Right, PageUp, PageDown, Home, End, Space.', inputSchema: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] } },
   { name: 'browser_scroll', description: 'Scroll the page one screen up or down and return a new snapshot.', inputSchema: { type: 'object', properties: { direction: { type: 'string', enum: ['up', 'down'] } }, required: ['direction'] } },
   { name: 'browser_back', description: 'Go back to the previous page.', inputSchema: { type: 'object', properties: {} } },
@@ -38,7 +38,7 @@ async function call(name, args) {
 async function handle(msg) {
   const { id, method, params } = msg;
   if (method === 'initialize') {
-    send({ id, result: { protocolVersion: (params && params.protocolVersion) || '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'firefly-browser', version: '2.1.0' },
+    send({ id, result: { protocolVersion: (params && params.protocolVersion) || '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'firefly-browser', version: '2.2.0' },
       instructions: 'Tools to drive the 萤火浏览器 window. Typical loop: browser_navigate → read the snapshot → browser_click / browser_type by ref → read the new snapshot. Refs change when the page changes.' } });
     return;
   }

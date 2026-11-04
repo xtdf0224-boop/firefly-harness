@@ -8,7 +8,7 @@ author: firefly-harness
 
 # 字数统计
 
-这个技能带了一个脚本，演示怎样让 Agent 运行技能里的程序。它只在命令行 Agent（Claude Code、Codex、Kimi Code 等）的工作任务里能用；通过 API 接入的模型没有执行命令的能力。
+这个技能带了一个脚本，演示怎样让 Agent 运行技能里的程序。它只在能执行命令的工作任务里能用：命令行 Agent（Claude Code、Codex、Kimi Code 等），或者带工作文件夹的 API 工作任务（命令由萤火在 PowerShell 里替模型执行）；API 方式的闲聊没有执行命令的能力。
 
 ## 什么时候用
 

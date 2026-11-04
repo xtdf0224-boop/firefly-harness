@@ -3,7 +3,7 @@
 import { CheckCircle2, Cpu, ExternalLink, Gauge, KeyRound, Layers, LogIn, Pencil, Plug, RefreshCw, Star, Terminal, Trash2, XCircle } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { Effort } from '../../../lib/effort';
-import { DRIVERS, contextOf, ctxLabel, readiness, regionOf, type ProviderInfo } from '../../../lib/providers';
+import { DRIVERS, contextOf, ctxLabel, isCodingPlan, isCustomBase, readiness, regionOf, type ProviderInfo } from '../../../lib/providers';
 import type { AuthMode, DriverId, ModelState, ProviderConfig } from '../../../lib/types';
 import { TESTING, choiceEfforts, cleanPath, defaultChoice, effortMenu, modelActions, modelOptions } from '../../../state/models';
 import { useApp } from '../../../state/store';
@@ -12,7 +12,7 @@ import { MenuSelect } from '../../ui/MenuSelect';
 
 const AUTH_OPTIONS: Array<{ value: AuthMode; label: string; icon: typeof Terminal; hint: string }> = [
   { value: 'cli', label: '命令行登录', icon: Terminal, hint: '用官方命令行工具（Claude Code、Codex…）登录账号后驱动它' },
-  { value: 'api', label: 'API 密钥', icon: KeyRound, hint: '用这家的 API Key 直接调用接口' },
+  { value: 'api', label: 'API 密钥', icon: KeyRound, hint: '用这家的 API Key 直接调用接口；工作任务里，模型也能用萤火自己的工具读写文件、执行命令，按「工具与技能」的策略执行（写文件、执行命令默认先问你）' },
 ];
 
 function ago(at: number) {
@@ -220,6 +220,7 @@ function ApiPane({ info, cfg, models, disabled }: { info: ProviderInfo; cfg: Pro
           <span className="model-field__label">服务地区</span>
           <Segmented<string> size="sm" label="服务地区" options={info.regions.map((r) => ({ value: r.id, label: r.label }))} value={cfg.region}
             onChange={(v) => modelActions.set(info.id, { region: v })} />
+          {isCodingPlan(info, cfg) && <p className="model-field__hint model-field__hint--warn">Coding Plan 的密钥按服务商条款只能在官方支持的编程工具里用；在工作任务里让模型调用工具可能被风控。</p>}
         </div>
       )}
       <KeyField info={info} cfg={cfg} disabled={disabled} />
@@ -231,6 +232,7 @@ function ApiPane({ info, cfg, models, disabled }: { info: ProviderInfo; cfg: Pro
           <label className="model-field__label" htmlFor={`${ids}-u`}>服务地址<span className="model-field__opt">（留空用官方地址）</span></label>
           <input id={`${ids}-u`} className="input mono" value={cfg.baseUrl} disabled={disabled} spellCheck={false} autoComplete="off"
             placeholder={region.baseUrl} onChange={(e) => modelActions.set(info.id, { baseUrl: e.target.value.trim() })} />
+          {isCustomBase(info, cfg) && <p className="model-field__hint model-field__hint--warn">不是官方地址：工作任务里，这个地址的服务能看到模型读到的文件内容，所以每次工具调用都要先经你确认。</p>}
         </div>
       </details>
     </div>

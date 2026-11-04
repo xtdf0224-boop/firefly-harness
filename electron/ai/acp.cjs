@@ -127,7 +127,7 @@ function runAcp(spec, emit) {
 
   (async () => {
     try {
-      const init = await request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'FireflyHarness', version: '2.1.0' } });
+      const init = await request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'FireflyHarness', version: '2.2.0' } });
       const canLoad = !!(init && init.agentCapabilities && init.agentCapabilities.loadSession);
       if (spec.sessionId && canLoad) {
         replaying = true;

@@ -28,7 +28,7 @@ export type ProviderId = 'claude' | 'gpt' | 'deepseek' | 'kimi' | 'qwen' | 'glm'
  *  Anthropic-compatible endpoint with that vendor's key. */
 export type DriverId = 'claude-code' | 'codex' | 'kimi' | 'qwen' | 'mcode' | 'dsh' | 'claude-compat';
 export type AuthMode = 'cli' | 'api';
-/** What a work task's CLI agent may do: follow 工具与技能's policies, or only read. */
+/** What a work task's agents (command-line, or API models with the workbench's tools) may do: follow 工具与技能's policies, or only read. */
 export type WorkAccess = 'policy' | 'read';
 
 export interface CliStatus {
@@ -96,12 +96,13 @@ export interface TaskEngine {
   model: string;
   /** e.g. 「Claude · Claude Code」 — shown in headers and messages. */
   label: string;
-  /** Working folder for CLI agents. */
+  /** Working folder of a 工作 task: a CLI agent works in it, and so does an API model (its tools write only inside it; reading elsewhere asks first).
+   *  Older API tasks and 闲聊 over an API model have none and stay think-and-write only. */
   cwd?: string;
   access?: WorkAccess;
   /** 推理强度; undefined = the model's / tool's own default. */
   effort?: import('./effort').Effort;
-  /** 浏览器控制: the CLI agent may drive the 萤火浏览器 window. */
+  /** 浏览器控制: the agent (CLI, or an API model with tools) may drive the 萤火浏览器 window. */
   browser?: boolean;
 }
 
@@ -139,7 +140,7 @@ export interface Agent {
   description: string;
   /** Its own model for the steps it is given; undefined = the task's model. The 编排 Agent always uses the task's. */
   engine?: AgentEngine;
-  /** Tools it may use when its steps run on a command-line agent. */
+  /** Tools it may use when its steps run on a command-line agent, or on an API model in a work task with a folder. */
   tools: ToolId[];
   enabled: boolean;
   /** Short glyph text for the avatar (1–2 chars). */
@@ -351,6 +352,8 @@ export interface Run {
   engineLabel?: string;
   /** Agents that ran on their own model in this run (snapshot taken when the run started). */
   agentEngines?: Partial<Record<AgentId, TaskEngine>>;
+  /** An API model's tool call was refused by its service address (no /responses, no `tools`): the run's API turns think and write only from then on. */
+  noTools?: boolean;
   /** Which done steps each CLI session has been told about ('task' = the task's own session, or an
    *  agent id): results produced elsewhere are handed to a session once, before its next turn. */
   shown?: Record<string, string[]>;

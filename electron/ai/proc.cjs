@@ -176,9 +176,28 @@ function searchPath(query) {
   return value;
 }
 
+let pathPending = null; // the asynchronous reading in progress: callers that arrive meanwhile wait for the same one
+/** searchPath() for a caller that must not hold the main process up (a command started from a tool): a reading
+ *  kept from before is returned at once, otherwise the registry is read with an asynchronous child process.
+ *  The same parsing, the same kept reading. → a Promise of the PATH. */
+function searchPathAsync() {
+  const proc = String(process.env.PATH || '');
+  if (pathCache && pathCache.proc === proc && Date.now() - pathCache.at < PATH_TTL_MS) return Promise.resolve(pathCache.value);
+  if (!isWin) return Promise.resolve(proc);
+  if (pathPending && pathPending.proc === proc) return pathPending.promise;
+  const promise = (async () => {
+    const buf = registry.stub ? registry.read(...REG_ENV_KEYS.map((key) => [key, '/v', 'Path'])) : await regQueryAsync(...REG_ENV_KEYS.map((key) => [key, '/v', 'Path']));
+    const value = mergePath(proc, registryPathDirs(() => buf));
+    pathCache = { at: Date.now(), proc, value };
+    return value;
+  })().catch(() => mergePath(proc, [])).finally(() => { if (pathPending && pathPending.promise === promise) pathPending = null; });
+  pathPending = { proc, promise };
+  return promise;
+}
+
 /** Where the registry is read from: scripts/unit-check.ts swaps it for a stand-in (and drops the reading kept above). */
-const registry = { read: (...queries) => regQuery(...queries) };
-function useRegistry(read) { registry.read = read || ((...queries) => regQuery(...queries)); pathCache = null; }
+const registry = { read: (...queries) => regQuery(...queries), stub: false };
+function useRegistry(read) { registry.read = read || ((...queries) => regQuery(...queries)); registry.stub = !!read; pathCache = null; pathPending = null; }
 
 function hasFile(p) { try { return fs.statSync(p).isFile(); } catch { return false; } }
 /** An existing folder; never asked of a network share (a dead one would hold this process up). */
@@ -247,20 +266,72 @@ function regQuery(...queries) {
   if (!isWin) return null;
   let r = null;
   try {
-    const reg = q(path.join(SYS32, 'reg.exe'));
-    const line = queries.map((args) => [reg, 'query', ...args.map(q)].join(' ')).join(' & ');
-    // chcp by full path, and cmd.exe started in System32: a bare `chcp` is looked up in the current folder
-    // first, where whatever sits beside the app (a chcp.cmd in Downloads) would run at every start.
-    r = spawnSync(path.join(SYS32, 'cmd.exe'), ['/d', '/s', '/c', `"${q(path.join(SYS32, 'chcp.com'))} 65001>nul & ${line}"`], { cwd: SYS32, windowsHide: true, windowsVerbatimArguments: true, timeout: 8000 });
+    r = spawnSync(path.join(SYS32, 'cmd.exe'), regCmdArgs(queries), { cwd: SYS32, windowsHide: true, windowsVerbatimArguments: true, timeout: 8000 });
   } catch { r = null; } // an argument q() would not pass through cmd.exe
   if (!r || r.error) {
     const outs = queries.map(regDirect).filter(Boolean);
     return outs.length ? Buffer.concat(outs) : null;
   }
+  return regOutput(queries, r);
+}
+
+/** The cmd.exe arguments that run `reg query` for each of `queries` under chcp 65001. (Throws for an argument q() refuses.) */
+function regCmdArgs(queries) {
+  const reg = q(path.join(SYS32, 'reg.exe'));
+  const line = queries.map((args) => [reg, 'query', ...args.map(q)].join(' ')).join(' & ');
+  // chcp by full path, and cmd.exe started in System32: a bare `chcp` is looked up in the current folder
+  // first, where whatever sits beside the app (a chcp.cmd in Downloads) would run at every start.
+  return ['/d', '/s', '/c', `"${q(path.join(SYS32, 'chcp.com'))} 65001>nul & ${line}"`];
+}
+
+/** What cmd.exe printed for `queries` ({ status, stdout }) → the output marked .utf8 when it is, or null. */
+function regOutput(queries, r) {
   // One query: a missing key is a failure. Several: whatever the others found still counts.
   if ((queries.length === 1 && r.status !== 0) || !r.stdout || !r.stdout.length) return null;
   if (isUtf8(r.stdout)) r.stdout.utf8 = true;
   return r.stdout;
+}
+
+/** Start `file` without holding the process up: → { status, stdout } when it ended, or null (it could not start, or took longer than `timeoutMs`). */
+function spawnCollect(file, args, options, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    let child;
+    try { child = spawn(file, args, { ...options, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { resolve(null); return; }
+    const chunks = [];
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => { try { child.kill(); } catch { /* already gone */ } finish(null); }, timeoutMs);
+    child.stdout.on('data', (chunk) => chunks.push(chunk));
+    child.stdout.on('error', () => {});
+    child.on('error', () => finish(null));
+    child.on('close', (status) => finish({ status, stdout: Buffer.concat(chunks) }));
+  });
+}
+
+/** regDirect without blocking. */
+async function regDirectAsync(args) {
+  const r = await spawnCollect(path.join(SYS32, 'reg.exe'), ['query', ...args]);
+  return r && r.status === 0 && r.stdout.length ? r.stdout : null;
+}
+
+/** regQuery without blocking: the same command, the same answer. */
+async function regQueryAsync(...queries) {
+  if (!isWin) return null;
+  let r = null;
+  try {
+    r = await spawnCollect(path.join(SYS32, 'cmd.exe'), regCmdArgs(queries), { cwd: SYS32, windowsVerbatimArguments: true });
+  } catch { r = null; } // an argument q() would not pass through cmd.exe
+  if (!r) {
+    const outs = [];
+    for (const args of queries) { const out = await regDirectAsync(args); if (out) outs.push(out); }
+    return outs.length ? Buffer.concat(outs) : null;
+  }
+  return regOutput(queries, r);
 }
 
 /** `reg query` output → [{ key, values: { name: data } }], once for each distinct reading. */
@@ -380,6 +451,31 @@ function killTree(child) {
   try { child.kill(); } catch { /* already gone */ }
 }
 
+/** killTree for the API tools' commands: taskkill /t /f without spawnSync (that can hold the main process up
+ *  for 8 s). Resolves when taskkill is done or has been given up on; never rejects. */
+function killTreeAsync(pid) {
+  return new Promise((resolve) => {
+    const n = Number(pid);
+    if (!Number.isInteger(n) || n <= 0) { resolve(false); return; }
+    if (!isWin) {
+      // Commands there run as their own process group (detached): kill the group, else just the process.
+      try { process.kill(-n, 'SIGKILL'); } catch { try { process.kill(n, 'SIGKILL'); } catch { /* already gone */ } }
+      resolve(true);
+      return;
+    }
+    let child;
+    let timer = null;
+    let done = false;
+    const finish = (ok) => { if (done) return; done = true; clearTimeout(timer); resolve(ok); };
+    try {
+      child = spawn(path.join(SYS32, 'taskkill.exe'), ['/pid', String(n), '/t', '/f'], { windowsHide: true, stdio: 'ignore' });
+    } catch { resolve(false); return; }
+    timer = setTimeout(() => { try { child.kill(); } catch { /* already gone */ } finish(false); }, 8000);
+    child.on('error', () => finish(false));
+    child.on('close', (code) => finish(code === 0));
+  });
+}
+
 /** Run a command to completion and collect its output (detection, `auth status`, `--version`). */
 function runOnce(exe, args, { cwd, env, timeoutMs = 15000 } = {}) {
   return new Promise((resolve) => {
@@ -428,7 +524,8 @@ function flattenOutput(content, cap = 6000) {
 }
 
 module.exports = {
-  resolveCommand, forgetCommand, installDirs, spawnCli, killTree, runOnce, parseJson, summarizeInput, flattenOutput, q, isWin, expandVars, SYS32, cmdExe,
+  resolveCommand, forgetCommand, installDirs, spawnCli, killTree, killTreeAsync, runOnce, parseJson, summarizeInput, flattenOutput, q, isWin, expandVars, SYS32, cmdExe,
+  searchPath, searchPathAsync, makeStreamDecoder, legacyEncoding,
   // Exposed for scripts/unit-check.ts.
-  _internals: { mergePath, registryPathDirs, searchPath, lookupOnPath, useRegistry, regQuery, makeStreamDecoder, decodeLine, codePageLabel },
+  _internals: { mergePath, registryPathDirs, searchPath, searchPathAsync, lookupOnPath, useRegistry, regQuery, regQueryAsync, makeStreamDecoder, decodeLine, codePageLabel },
 };

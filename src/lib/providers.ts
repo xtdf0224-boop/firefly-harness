@@ -301,6 +301,28 @@ export function contextOf(p: ProviderInfo, model: string): { tokens: number; kno
 export const regionOf = (p: ProviderInfo, cfg: Pick<ProviderConfig, 'region'>) => p.regions.find((r) => r.id === cfg.region) ?? p.regions[0];
 export const apiBaseUrl = (p: ProviderInfo, cfg: ProviderConfig) => cfg.baseUrl.trim() || regionOf(p, cfg).baseUrl;
 
+const sameUrl = (a: string, b: string) => a.trim().replace(/\/+$/, '').toLowerCase() === b.trim().replace(/\/+$/, '').toLowerCase();
+
+/** A service address typed into 高级 that is not one of the vendor's own (a 中转站): it sees every file the model reads.
+    Official means the vendor's own server, whatever the path on it (api.deepseek.com/v1 is the same server as api.deepseek.com): https,
+    the host of one of its regions, the default port, no login in front of the host. */
+export const isCustomBase = (p: ProviderInfo, cfg: Pick<ProviderConfig, 'baseUrl'>) => {
+  const url = cfg.baseUrl.trim();
+  if (!url) return false;
+  if (p.regions.some((r) => sameUrl(r.baseUrl, url))) return false;
+  let u: URL;
+  try { u = new URL(url); } catch { return true; }
+  if (u.protocol !== 'https:' || u.username || u.password || (u.port && u.port !== '443')) return true;
+  const host = u.hostname;
+  return !p.regions.some((r) => { try { return new URL(r.baseUrl).hostname === host; } catch { return false; } });
+};
+
+/** Is the API address in use the vendor's Coding Plan one (its key is meant for the vendor's own coding tools)? */
+export const isCodingPlan = (p: ProviderInfo, cfg: ProviderConfig) => {
+  const coding = p.regions.find((r) => r.id === 'coding');
+  return !!coding && sameUrl(apiBaseUrl(p, cfg), coding.baseUrl);
+};
+
 /** Is this way of using the vendor set up? (A passing test is not required — just the ingredients.) */
 export function readiness(p: ProviderInfo, cfg: ProviderConfig, auth: 'api' | 'cli'): { ready: boolean; reason?: string } {
   if (auth === 'api') return cfg.keyHint ? { ready: true } : { ready: false, reason: '还没有保存 API Key' };
@@ -323,6 +345,78 @@ export function engineLabel(p: ProviderInfo, auth: 'api' | 'cli', driver: Driver
   return model ? `${modelName(p, model)} · ${how}` : `${p.name} · ${how}`;
 }
 
+const GIT_SUBCOMMANDS = new Set([
+  'status', 'log', 'diff', 'show', 'branch', 'add', 'commit', 'checkout', 'switch', 'restore', 'reset', 'stash', 'tag', 'fetch', 'pull', 'push', 'merge',
+  'rebase', 'remote', 'init', 'rev-parse', 'ls-files', 'blame', 'mv', 'rm', 'cherry-pick', 'revert', 'describe', 'shortlog', 'grep', 'clone',
+]);
+/** Options that run a program, point git at other config, files or folders, or write outside the working tree (docs/API-TOOLS.md §4.5, plus
+    --config / --template / --output / --open-files-in-pager / --no-index / --reference, which do the same). Git takes unique prefixes of long options. */
+const GIT_BAD_LONG = ['--config-env', '--exec-path', '--git-dir', '--work-tree', '--namespace', '--upload-pack', '--receive-pack', '--exec',
+  '--config', '--template', '--output', '--open-files-in-pager', '--no-index', '--separate-git-dir', '--ext-diff', '--textconv', '--reference', '--reference-if-able'];
+// Short options are bundled (-qc is -q -c, -fx is -f -x) and take their value attached (-ccore.x=1, -xcalc, -F../x),
+// so the letters of the whole cluster up to a '=' are looked at, not the first one.
+const GIT_SHORT_NO = /^-(?!-)[^=]*[cCxO]/; // -c key=value, -C dir, rebase -x <command>, grep -O<pager>
+const GIT_SHORT_U = /^-(?!-)[^=]*u/; // clone / fetch / pull -u <program> (upload-pack); push -u only sets the upstream
+const GIT_TAKES_URL = new Set(['clone', 'fetch', 'pull', 'ls-remote']);
+// To these git reads host:path (no slash before the colon) as an ssh address, so any word with a colon is one unless it is
+// an https remote; a refspec with a colon (main:main) asks like a shell command, which is rare enough.
+const GIT_NET = new Set(['clone', 'fetch', 'pull', 'push', 'ls-remote']);
+// A path outside the folder, in any spelling: a drive (C:\x, and C:x, which is relative to that drive's folder), the root or a
+// UNC path (\x, //host/share), or '..' as a part of the path (a range such as main..topic is not one).
+const GIT_PATHISH = /^([A-Za-z]:|[\\/]|\.\.([\\/]|$))|[\\/]\.\.([\\/]|$)/;
+const GIT_URLISH = /:\/\/|::|^[^\s/@]+@[^\s:]+:/; // https://host/x, ext::program, user@host:path
+const GIT_LOCAL_TLD = new Set(['localhost', 'local', 'internal']);
+
+/** What a word can be besides itself: the part after the first '=' (--file=C:/x), and for a short option what is left after
+    one to three option letters (-FC:/x, -nF../x), where the value is attached. */
+function gitCandidates(w: string): string[] {
+  const out = [w];
+  const eq = w.indexOf('=');
+  if (eq >= 0) out.push(w.slice(eq + 1));
+  if (/^-(?!-)/.test(w)) for (let k = 2; k <= 4 && k < w.length; k++) out.push(w.slice(k));
+  return out;
+}
+
+/** https://host.tld/… where the host is a name that looks public: dotted, last part not a number (no 127.0.0.1, 2130706433,
+    0x7f.1), not localhost / .local / .internal, no login before the @ and nothing the address parser would read differently. */
+function gitHttpsRemote(word: string): boolean {
+  const m = /^https:\/\/([^/?#]*)/i.exec(word);
+  if (!m || !m[1] || m[1].includes('@')) return false;
+  const labels = m[1].replace(/:\d*$/, '').replace(/\.$/, '').toLowerCase().split('.');
+  if (labels.length < 2 || !labels.every((l) => /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(l))) return false;
+  const tld = labels[labels.length - 1];
+  return /^[a-z]/.test(tld) && !GIT_LOCAL_TLD.has(tld);
+}
+
+/** A command that is nothing but one ordinary git command: a known subcommand, no way to chain, substitute or redirect,
+    no option that runs a program, and no path that leaves the folder. Anything else is a shell command (§4.5). */
+export function isPureGit(command: string): boolean {
+  const cmd = command.trim();
+  // ; & | < > ` $ ( ) { } [ ], new lines, other control characters and the invisible or direction-changing ones (as NOT_PURE in electron/ai/tools/shell.cjs).
+  if (!cmd || /[;&|<>`$(){}[\]\x00-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028-\u202e\u2060\u2066-\u2069\ufeff]/.test(cmd)) return false;
+  // PowerShell's stop-parsing token (--%, or with \u2013 \u2014 \u2015) turns on %VAR% expansion after it (as STOP_PARSING in shell.cjs).
+  if (/[-\u2013-\u2015]{2}%/.test(cmd)) return false;
+  const words = cmd.split(/\s+/);
+  const sub = words[1] ?? '';
+  if (words[0] !== 'git' || !GIT_SUBCOMMANDS.has(sub)) return false;
+  const takesUrl = GIT_TAKES_URL.has(sub);
+  // `remote add` / `set-url` point git at another place: only looking at the remotes is git (shell.cjs isPureGit says the same).
+  if (sub === 'remote' && words.length > 2 && !['-v', '--verbose', 'show', 'get-url'].includes(words[2].replace(/["'\u2018-\u201e]/g, ''))) return false;
+  return words.slice(2).every((raw) => {
+    // PowerShell reads the curly quotes as quotes too.
+    const w = raw.replace(/["'\u2018-\u201e]/g, '');
+    if (GIT_SHORT_NO.test(w) || (takesUrl && GIT_SHORT_U.test(w))) return false;
+    if (w.startsWith('--') && w !== '--') {
+      const name = w.split('=')[0];
+      if (GIT_BAD_LONG.some((bad) => bad.startsWith(name))) return false;
+    }
+    // A path outside the folder, or an address / transport (only clone / fetch / pull / ls-remote take one, and only https://host.tld;
+    // push goes to a named remote), in the word itself, after a =, or attached to a short option.
+    return gitCandidates(w).every((c) => !GIT_PATHISH.test(c) && (!GIT_URLISH.test(c) || (takesUrl && gitHttpsRemote(c)))
+      && !(GIT_NET.has(sub) && c.includes(':') && !(takesUrl && gitHttpsRemote(c))));
+  });
+}
+
 /** CLI tool names → the workbench's tool categories (for icons, policies and approvals). */
 export function toolCategory(name: string, input?: Record<string, unknown>): import('./types').ToolId {
   const n = name.toLowerCase();
@@ -331,8 +425,8 @@ export function toolCategory(name: string, input?: Record<string, unknown>): imp
   // Going to a new address (navigate, back) can reach a signed-in site or carry data out: it is an action.
   const b = n.match(/browser_(navigate|snapshot|scroll|back|screenshot|wait|click|type|press)/);
   if (b) return ['click', 'type', 'press', 'navigate', 'back'].includes(b[1]) ? 'browser_act' : 'browser_read';
-  // A command is git only when it is nothing but git: `git status; curl …` is a shell command.
-  if (/^(bash|powershell|shell|execute|run_shell_command|exec_command|local_shell)$/.test(n)) return /^git(\s|$)/.test(cmd) && !/[;&|<>`$\n\r]/.test(cmd) ? 'git' : 'shell';
+  // A command is git only when it is nothing but one plain git command: `git status; curl …` and `git log (Start-Process calc)` are shell commands.
+  if (/^(bash|powershell|shell|execute|run_shell_command|exec_command|local_shell)$/.test(n)) return isPureGit(cmd) ? 'git' : 'shell';
   if (/^(read|notebookread|read_file|read_many_files)$/.test(n)) return 'read_file';
   if (/^(write|edit|multiedit|notebookedit|apply_patch|write_file|replace|edit_file)$/.test(n)) return 'write_file';
   if (/^(grep|glob|ls|search|code_search|list_directory|search_file_content|find)$/.test(n)) return 'code_search';

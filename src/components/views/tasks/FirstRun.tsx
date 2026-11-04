@@ -11,11 +11,11 @@ export function FirstRun({ desktopOk }: { desktopOk: boolean }) {
       <ul className="first-run__ways">
         <li>
           <TerminalSquare size={16} aria-hidden />
-          <p><strong>命令行工具登录</strong><span>已经装了 Claude Code、Codex 等？用自己的账号登录它，Agent 就能在工作文件夹里读写文件、执行命令。</span></p>
+          <p><strong>命令行工具登录</strong><span>已经装了 Claude Code、Codex 等？用自己的账号登录它，Agent 就能用它自带的工具在工作文件夹里读写文件、执行命令。</span></p>
         </li>
         <li>
           <KeyRound size={16} aria-hidden />
-          <p><strong>API 密钥</strong><span>填一家模型服务的 API Key，密钥加密保存在本机。只用来思考和写作，不会动你的文件。</span></p>
+          <p><strong>API 密钥</strong><span>填一家模型服务的 API Key，密钥加密保存在本机。工作任务里，模型也能用萤火自己的工具在工作文件夹里读写文件、执行命令，需要确认的操作会先问你；读到的内容会发给这家服务商。闲聊只是对话。</span></p>
         </li>
       </ul>
       {desktopOk ? (

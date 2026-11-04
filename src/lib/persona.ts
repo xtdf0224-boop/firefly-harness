@@ -141,7 +141,7 @@ export interface PromptContext {
   mode: VisualMode;
   persona: boolean;
   callName: string;
-  /** CLI work: the folder the agent works in. */
+  /** Work turns that can act (a command-line agent, or an API model with tools): the folder the agent works in. */
   cwd?: string;
   /** Tools the agent can use in this run (empty = none). */
   canUseTools?: boolean;
@@ -163,23 +163,35 @@ export function systemPrompt(purpose: PromptPurpose, c: PromptContext, d = new D
   } else if (purpose === 'summary' || purpose === 'reply') {
     lines.push('你负责向对方汇报与答疑。先一句话给结论，再分点列出关键结果、产物位置和需要对方注意的地方。');
   } else if (purpose === 'cli') {
-    lines.push(`你在工作文件夹「${c.cwd ?? '当前目录'}」中工作，文件操作都限定在这里。先读后改；改动前用一句话说明理由；需要对方确认的操作会由工作台弹窗询问。`);
+    lines.push(`你在工作文件夹「${c.cwd ?? '当前目录'}」中工作，文件只在这里读写，没有必要不要碰这里以外的位置。先读后改；改动前用一句话说明理由；需要对方确认的操作会由工作台弹窗询问。`);
     lines.push('回复里给对方看的文字使用上面的口吻；代码、命令和文件内容保持原样。');
   }
   return lines.join('\n');
 }
 
-/** Role prompt for the non-persona agents in API runs (they speak plainly). */
-export function rolePrompt(agent: AgentId, callName: string) {
+/** How a helper agent's turn runs: 'cli' = a command-line agent (its own tools, in the working folder), 'tools' = an API model with
+    the workbench's tools (a 工作 task with a folder), 'think' = an API model with no tools (older tasks, the summary). */
+export type RoleWay = 'cli' | 'tools' | 'think';
+
+/** Role prompt for the helper agents. API helpers speak plainly; a command-line helper gets it after the 编排 Agent's prompt. `cwd`: the folder a 'tools' helper works in. */
+export function rolePrompt(agent: AgentId, callName: string, way: RoleWay = 'think', cwd?: string) {
   const name = callName.trim() || '开拓者';
-  const common = `你在「萤火 · Agent 工作台」的多 Agent 团队里工作，团队为「${name}」完成任务。本次运行通过 API 调用，没有文件、网络或命令权限：只能基于已有知识和对话内容推理与写作。需要文件或实时信息时，说明需要对方提供什么，并把时效性内容标注「需核实」。用中文，简洁专业。`;
+  const team = `你在「萤火 · Agent 工作台」的多 Agent 团队里工作，团队为「${name}」完成任务。`;
+  const ability: Record<RoleWay, string> = {
+    cli: '你可以用自己的工具在工作文件夹里完成工作（能用哪些，以实际提供给你的为准）；需要对方确认的操作会由工作台询问，被拒绝就换一种做法。用中文，简洁专业。',
+    tools: `你可以用工作台给你的工具在工作文件夹「${cwd ?? '当前目录'}」里完成工作：读写文件、执行命令、查资料，以这一轮实际提供的工具为准；文件只在这里读写，没有必要不要碰这里以外的位置。先读后改；改动前用一句话说明理由；需要对方确认的操作会由工作台弹窗询问，被拒绝就换一种做法。用中文，简洁专业。`,
+    think: '这次只能思考和写作；读写文件、执行命令要在带工作文件夹的工作任务里做。需要文件或实时信息时，说明需要对方提供什么，并把时效性内容标注「需核实」。用中文，简洁专业。',
+  };
+  const acts = way !== 'think';
   const role: Record<AgentId, string> = {
     orchestrator: '你是编排 Agent。',
     researcher: '你是检索 Agent：整理资料、比较方案，给出有依据的结论。',
-    coder: `你是编码 Agent：给出具体的代码与改动说明（代码放在代码块里，注明文件路径），由「${name}」自行应用。`,
+    coder: acts
+      ? '你是编码 Agent：用你的工具直接在工作文件夹里改文件、跑命令来完成改动，做完说明改了哪些文件、做了什么。'
+      : `你是编码 Agent：给出具体的代码与改动说明（代码放在代码块里，注明文件路径），由「${name}」自行应用。`,
     reviewer: '你是审查 Agent：检查前面步骤的产出，指出错误、遗漏和风险，并给出修正建议。',
   };
-  return `${role[agent]}${common}`;
+  return `${role[agent]}${team}${ability[way]}`;
 }
 
 /** Instruction for the opening line of a new chat nobody has spoken in yet. */
