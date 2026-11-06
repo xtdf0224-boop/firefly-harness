@@ -108,5 +108,9 @@
   },
   "allowScripts": {
     "electron@44.5.1": true
+  },
+  "dependencies": {
+    "jszip": "3.10.1",
+    "pptxgenjs": "4.0.1"
   }
 }

@@ -10,6 +10,7 @@
 
 const P = require('./paths.cjs');
 const files = require('./files.cjs');
+const presentation = require('./presentation.cjs');
 const shell = require('./shell.cjs');
 const web = require('./web.cjs');
 const browserTools = require('./browser-tools.cjs');
@@ -148,6 +149,7 @@ function definitions(ctx) {
     if (d.toolId === 'write_file' && readOnly) continue;
     out.push(copy(d));
   }
+  if (have.has('write_file') && !readOnly) out.push(copy(presentation.definition));
   if ((have.has('shell') || have.has('git')) && !readOnly) {
     out.push({
       ...copy({ ...SHELL_DEF, toolId: have.has('shell') ? 'shell' : 'git' }),
@@ -189,6 +191,7 @@ function guidance(defs, ctx) {
   }
   if (has('edit_file')) out.push('- 改文件之前先用 read_file 读它。edit_file 的 old_string 必须和文件里的文字一字不差（缩进、空格、换行都算），并且在文件里只出现一次；出现多次就多带几行上下文。');
   if (has('write_file')) out.push('- 内容大的文件分几次写：第一次 write_file 写前一部分，之后用 append=true 追加其余；一次最多 2 MB。write_file 会覆盖已有文件，覆盖前确认是你要的。');
+  if (has('create_presentation')) out.push('- 用户要交付 PPT 或 PowerPoint 文件时，直接用 create_presentation 把实际内容写成 .pptx，无需调用外部智能体。工具成功后告诉用户文件路径；失败时说明具体原因。');
   if (has('run_shell_command')) {
     out.push(ctx && ctx.shellOnlyGit
       ? '- run_shell_command 只能执行单独一条 git 命令，不能带管道、重定向、分号或别的命令。'
@@ -312,6 +315,21 @@ async function prepareFile(name, args, ctx, signal) {
   return ready(ctx, { input, display, title: p.title, reason: notes.filter(Boolean).join('；'), blockedPath: p.blockedPath, mustAsk: p.mustAsk, risk: p.risk });
 }
 
+async function preparePresentation(args, ctx, signal) {
+  const error = presentation.check(args.path, args.slides);
+  if (error) return fail(error);
+  const p = await files.plan('write_file', { path: args.path, content: '' }, ctx, signal);
+  if (!p.ok) return fail(p.error);
+  if (p.expect.exists) return fail('同名文件已经存在，请为新的演示文稿选择另一个文件名。');
+  const slides = args.slides.map(({ title, bullets }) => ({ title, bullets: [...bullets] }));
+  return ready(ctx, {
+    input: { path: p.path, slides, expect: p.expect },
+    display: { path: p.path, mode: 'create', content: slides.map(s => [s.title, ...s.bullets].join('\n')).join('\n\n') },
+    title: `创建 ${slides.length} 页 PPT：${P.relative(p.path, ctx)}`,
+    reason: p.reason, risk: p.risk, mustAsk: p.mustAsk, blockedPath: p.blockedPath,
+  });
+}
+
 function prepareShell(args, ctx) {
   const v = shell.validate(args.command);
   if (!v.ok) return fail(v.error);
@@ -413,6 +431,7 @@ async function prepare(name, rawInput, ctx, signal) {
     const b = build(def, rawInput);
     if (!b.ok) return fail(b.error);
     const args = b.input;
+    if (name === 'create_presentation') return await preparePresentation(args, ctx, signal);
     if (FILE_NAMES.has(name)) return await prepareFile(name, args, ctx, signal);
     if (name === 'run_shell_command') return prepareShell(args, ctx);
     if (name === 'web_fetch' || name === 'web_search') return prepareWeb(name, args, ctx);
@@ -444,7 +463,7 @@ const cap = (s, n) => (s.length > n ? `${s.slice(0, n - 30)}\n…（已截断，
 
 async function dispatch(name, input, ctx, signal) {
   const given = input && typeof input === 'object' ? input : {};
-  if (FILE_NAMES.has(name)) return files.execute(name, given, ctx, signal);
+  if (FILE_NAMES.has(name) || name === 'create_presentation') return files.execute(name, given, ctx, signal);
   if (name === 'run_shell_command') {
     // Checked again here: what runs must pass the same rule as what was shown.
     if (ctx.shellOnlyGit && !shell.isPureGit(given.command)) return { ok: false, output: '这个任务只允许执行单独一条 git 命令。', display: '这个任务只允许执行单独一条 git 命令。' };
@@ -456,7 +475,7 @@ async function dispatch(name, input, ctx, signal) {
     const msg = `这一轮的截图已经用完了（最多 ${MAX_SHOTS} 张）。请改用 browser_snapshot 读取页面文字。`;
     return { ok: false, output: msg, display: msg };
   }
-  if (BROWSER_NAMES.has(name)) return browserTools.call(name, given);
+  if (BROWSER_NAMES.has(name)) return browserTools.call(name, given, signal);
   return { ok: false, output: `不认识的工具：${shortName(name)}`, display: `不认识的工具：${shortName(name)}` };
 }
 

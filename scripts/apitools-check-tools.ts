@@ -863,7 +863,23 @@ async function tableChecks() {
   eq('"other" gives nothing', names(base({ tools: ['other'] })), []);
   eq('read_file', names(base({ tools: ['read_file'] })), ['read_file']);
   eq('code_search', names(base({ tools: ['code_search'] })), ['list_directory', 'glob', 'search_file_content']);
-  eq('write_file', names(base({ tools: ['write_file'] })), ['write_file', 'edit_file']);
+  eq('write_file', names(base({ tools: ['write_file'] })), ['write_file', 'edit_file', 'create_presentation']);
+  eq('PPT creation follows the file-write approval policy', toolCategory('create_presentation', {}), 'write_file');
+  const deckCtx = base({ tools: ['write_file'], confirmAll: true });
+  const deck = { path: 'slides/deck.pptx', slides: [{ title: '页一', bullets: [] }, { title: '页二', bullets: ['收入 & 成本', '执行安排'] }] };
+  const deckPlan = await T.prepare('create_presentation', deck, deckCtx);
+  expect('PPT card identifies the file and what will be written', deckPlan.ok && deckPlan.mustAsk && deckPlan.display.path.endsWith('deck.pptx') && deckPlan.display.content.includes('执行安排'));
+  const created = await T.execute('create_presentation', deckPlan.input, deckCtx);
+  expect('PPT generation succeeds without shell', created.ok, created);
+  const dest = path.join(fx.work, deck.path);
+  const zip = await req('jszip').loadAsync(fs.readFileSync(dest), { checkCRC32: true });
+  eq('two real PowerPoint slide parts', zip.file(/^ppt\/slides\/slide\d+\.xml$/).length, 2);
+  expect('second slide has editable text', (await zip.file('ppt/slides/slide2.xml').async('string')).includes('收入 &amp; 成本'));
+  expect('the original approval cannot overwrite another file', !(await T.execute('create_presentation', deckPlan.input, deckCtx)).ok);
+  expect('existing name cannot be approved', !(await T.prepare('create_presentation', deck, deckCtx)).ok);
+  expect('invalid slides rejected before approval', !(await T.prepare('create_presentation', { ...deck, slides: [{}] }, deckCtx)).ok);
+  expect('outside folder rejected before approval', !(await T.prepare('create_presentation', { ...deck, path: path.join(fx.outside, 'x.pptx') }, deckCtx)).ok);
+  expect('read-only blocks PPT', !(await T.prepare('create_presentation', deck, { ...deckCtx, readOnly: true })).ok);
   eq('read-only drops writing, commands, git and the browser actions', names(base({ tools: ['write_file', 'shell', 'git', 'browser_act'], browser: true, readOnly: true })), []);
   eq('git alone offers the command tool, described as git only', [names(base({ tools: ['git'] })), /git/.test(T.definitions(base({ tools: ['git'] }))[0].description), T.definitions(base({ tools: ['git'] }))[0].toolId], [['run_shell_command'], true, 'git']);
   eq('shell wins over git', T.definitions(base({ tools: ['shell', 'git'] }))[0].toolId, 'shell');
@@ -1028,4 +1044,8 @@ export async function toolChecks() {
   await webChecks();
   providerChecks();
   await tableChecks();
+  section('Browser cancellation: queued and in-progress actions');
+  await req('./scripts/browser-cancel-check.cjs')({ req, tools: T, fakeBrowser, eq, expect });
+  section('Skills import: validate the staged copy before replacing an installed skill');
+  await req('./scripts/skills-import-check.cjs')({ req, tmp, rm, write, eq, expect });
 }

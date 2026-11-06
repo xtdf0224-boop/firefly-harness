@@ -1,7 +1,8 @@
 // The 萤火浏览器 as tools for the API loop: the same nine tools the CLI agents get from browser-mcp.cjs (same
 // names and parameters; the descriptions are in Chinese for the model), called in-process through browser.cjs'
 // own queue, so they share its one-action-at-a-time order, its 60 second limit and the toolbar's "Agent 在操作".
-// A browser action cannot be interrupted once it has started (60 seconds at most).
+// A stopped API turn skips queued actions and checks again before clicking, typing or pressing a key.
+// Input already sent to the page cannot be undone; a running page script may still finish.
 // Plain Node can load this file: browser.cjs is only required when a tool is called.
 'use strict';
 
@@ -76,7 +77,7 @@ function reasonFor(name, input, info) {
  * Run one browser tool. `input` is what the loop validated; only the known fields are used. → { ok, output, display, image? }
  * (image: { mime, data } for a screenshot.) Never rejects.
  */
-async function call(name, input) {
+async function call(name, input, signal) {
   if (!BY_NAME.has(name)) return fail(`未知的浏览器工具：${name}`);
   const given = input && typeof input === 'object' ? input : {};
   const args = {};
@@ -99,7 +100,7 @@ async function call(name, input) {
   if (name === 'browser_scroll') args.direction = given.direction === 'up' ? 'up' : 'down';
   if (name === 'browser_wait') args.seconds = Number(given.seconds);
   let result;
-  try { result = await browser().runQueued(name, args); } catch (e) { return fail(`浏览器出错：${String(e && e.message || e)}`); }
+  try { result = await browser().runQueued(name, args, signal); } catch (e) { return fail(`浏览器出错：${String(e && e.message || e)}`); }
   const parts = result && Array.isArray(result.content) ? result.content : [];
   const text = parts.filter((p) => p && p.type === 'text').map((p) => String(p.text)).join('\n');
   const shot = parts.find((p) => p && p.type === 'image' && p.data);

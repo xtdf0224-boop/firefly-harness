@@ -975,6 +975,42 @@ export async function wiringChecks() {
   const mine = (s: Sender, id: string) => s.events.filter((e) => e.id === id);
   const ended = (s: Sender, id: string) => mine(s, id).some((e) => e.type === 'done' || e.type === 'error');
 
+  // A complete key must never reach the page, even when transport chunks and reasoning interleave.
+  const key = 'sk-secret-key-123';
+  const { redactedEmitter } = req('./electron/ai/redact.cjs');
+  for (let cut = 1; cut < key.length; cut++) {
+    const events: Any[] = [];
+    const emit = redactedEmitter((event: Any) => events.push(event), key);
+    emit({ type: 'text', text: `before ${key.slice(0, cut)}` });
+    emit({ type: 'thinking', text: `think ${key.slice(0, cut)}` });
+    emit({ type: 'permission', requestId: 'pending', input: { value: key } });
+    expect(`redaction at split ${cut}: approvals still reach the page immediately`, events.at(-1)?.type === 'permission');
+    emit({ type: 'text', text: `${key.slice(cut)} after` });
+    emit({ type: 'thinking', text: `${key.slice(cut)} end` });
+    emit({ type: 'done', text: `before ${key} after`, final: `before ${key} after` });
+    eq(`redaction at split ${cut}: text and thinking are both masked`, [
+      of(events, 'text').map(e => e.text).join(''), of(events, 'thinking').map(e => e.text).join(''),
+    ], ['before •••• after', 'think •••• end']);
+    expect(`redaction at split ${cut}: complete event fields are masked too`, !JSON.stringify(events).includes(key));
+  }
+  for (const ending of ['done', 'error', 'text-break']) {
+    const events: Any[] = [];
+    const emit = redactedEmitter((event: Any) => events.push(event), key);
+    emit({ type: 'text', text: 'ordinary words ending sk-' });
+    emit({ type: 'thinking', text: 'reasoning ending sk-' });
+    emit({ type: ending, text: '', message: key });
+    eq(`${ending}: an unmatched suffix is preserved before the boundary`, of(events, 'text').map(e => e.text).join(''), 'ordinary words ending sk-');
+    eq(`${ending}: the thinking suffix stays in its original message`, of(events, 'thinking').map(e => e.text).join(''), 'reasoning ending sk-');
+    eq(`${ending}: the boundary remains last`, events.at(-1)?.type, ending);
+  }
+  {
+    const events: Any[] = [];
+    const emit = redactedEmitter((event: Any) => events.push(event), key);
+    for (const text of `a ${key}${key} sk-not-a-key`) emit({ type: 'text', text });
+    emit({ type: 'done' });
+    eq('character-sized chunks and adjacent keys preserve surrounding text', of(events, 'text').map(e => e.text).join(''), 'a •••••••• sk-not-a-key');
+  }
+
   // not a work turn, or no tools: a plain model call
   let s = new Sender();
   let id = start(s, { ...base, access: 'chat', tools: ['read_file'], cwd: work });
@@ -1060,6 +1096,37 @@ export async function wiringChecks() {
   const tested = await ipc.get('ai:test')!({ sender: new Sender() }, { ...base, tools: ['read_file'], cwd: work, access: 'work', confirmAll: true });
   expect('ai:test works', tested.ok, tested);
   expect('…and sends no tools', !svc.reqs[0].body.tools);
+  expect('the connection test response also masks the key', !JSON.stringify(tested).includes(key) && tested.text.includes('••••'), tested);
+
+  // Both API paths go through the same redactor, including terminal HTTP failures.
+  const echoed = fakeService(() => ({ status: 401, json: { error: { message: `Incorrect API key: ${key}` } } }));
+  for (const driver of ['api-openai', 'api-anthropic']) {
+    for (const access of ['chat', 'work']) {
+      const sender = new Sender();
+      const stream = start(sender, { ...base, driver, provider: driver === 'api-anthropic' ? 'claude' : 'deepseek', baseUrl: echoed.base, access, tools: ['read_file'], cwd: work });
+      expect(`${driver}/${access}: a rejected key ends the call`, await waitFor(() => ended(sender, stream)));
+      const events = mine(sender, stream);
+      expect(`${driver}/${access}: the error is redacted before IPC`, !JSON.stringify(events).includes(key) && events.at(-1)?.message?.includes('••••'), events);
+    }
+  }
+  echoed.close();
+  const splitKey = fakeService(() => ({ frames: [
+    chunk({ content: `before ${key.slice(0, 9)}` }),
+    chunk({ reasoning_content: key.slice(0, 5) }),
+    chunk({ content: `${key.slice(9)} after` }),
+    chunk({ reasoning_content: key.slice(5) }),
+    chunk({}, 'stop'), '[DONE]',
+  ] }));
+  for (const access of ['chat', 'work']) {
+    const sender = new Sender();
+    const stream = start(sender, { ...base, baseUrl: splitKey.base, access, tools: ['read_file'], cwd: work });
+    expect(`${access}: split-key reply finishes`, await waitFor(() => ended(sender, stream)));
+    const events = mine(sender, stream);
+    eq(`${access}: renderer receives only masked text`, of(events, 'text').map(e => e.text).join(''), 'before •••• after');
+    eq(`${access}: renderer receives only masked thinking`, of(events, 'thinking').map(e => e.text).join(''), '••••');
+    expect(`${access}: full final events are masked as well`, !JSON.stringify(events).includes(key));
+  }
+  splitKey.close();
 
   // the flags reach the tool list and the questions
   svc.reqs.length = 0;

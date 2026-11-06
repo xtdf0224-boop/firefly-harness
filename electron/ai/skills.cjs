@@ -82,7 +82,7 @@ function describe(dir, folder, disabled) {
     version: typeof meta.version === 'string' ? meta.version.slice(0, 20) : undefined,
     author: typeof meta.author === 'string' ? meta.author.slice(0, 60) : undefined,
     body: body.length > MAX_BODY_CHARS ? `${body.slice(0, MAX_BODY_CHARS)}\n…（正文过长，已截断）` : body,
-    error: error || (!meta.description ? 'SKILL.md 缺少 description（Agent 靠它判断什么时候用这个技能）' : undefined),
+    error: error || (typeof meta.description !== 'string' || !meta.description.trim() ? 'SKILL.md 缺少有效的 description（Agent 靠它判断什么时候用这个技能）' : undefined),
   };
 }
 
@@ -160,7 +160,9 @@ function finishImport(src, name) {
     if (!fs.existsSync(path.join(src, 'SKILL.md'))) throw new Error('来源文件夹里找不到 SKILL.md 了（可能被移动或删除）。');
     scan(src);
     copyDir(src, staging);
-    if (!fs.existsSync(path.join(staging, 'SKILL.md'))) throw new Error('复制后没有得到 SKILL.md。');
+    scan(staging);
+    const checked = describe(staging, name, []);
+    if (checked.error) throw new Error(checked.error);
   } catch (e) {
     fs.rmSync(staging, { recursive: true, force: true });
     throw new Error(`导入失败，原来的技能没有改动：${e.message}`);

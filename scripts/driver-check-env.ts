@@ -5,6 +5,7 @@ export type Handler = (ev: { id: string; type: string; [key: string]: unknown })
 export const hooks: {
   handlers: Handler[];
   start: (spec: never) => Promise<string>;
+  test: (spec: never) => Promise<unknown>;
   /** Every spec the page started a stream with, in order (the check clears it between scenarios). */
   starts: unknown[];
   answers: Array<{ id: string; requestId: string; decision: string; input?: Record<string, unknown> }>;
@@ -14,11 +15,14 @@ export const hooks: {
   inputResult: boolean;
   /** Called when the page answers a question, so a fake stream waiting for it can go on. */
   onAnswer?: (id: string, requestId: string, decision: string) => void;
-} = { handlers: [], start: async () => 'none', starts: [], answers: [], inputs: [], stops: [], inputResult: true };
+} = { handlers: [], start: async () => 'none', test: async () => ({ ok: true, text: 'OK', ms: 1 }), starts: [], answers: [], inputs: [], stops: [], inputResult: true };
 
 const bridge = {
   onEvent(fn: Handler) { hooks.handlers.push(fn); return () => {}; },
   start: (spec: never) => hooks.start(spec),
+  test: (spec: never) => hooks.test(spec),
+  saveKey: async () => ({ ok: true, hint: '••••1234' }),
+  clearKey: async () => ({ ok: true }),
   detect: async () => ({ found: false }),
   info: async () => ({}),
   answer: async (id: string, requestId: string, decision: string, input?: Record<string, unknown>) => {

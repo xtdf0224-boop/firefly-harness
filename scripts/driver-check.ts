@@ -5,6 +5,7 @@
    system prompt that must not change from turn to turn, the permission check, the history sent to an
    API model, and which program path a task is given. Plain assertions, no test runner. */
 import { hooks } from './driver-check-env';
+import { acpPermissionChecks } from './acp-permission-check';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -15,6 +16,7 @@ import type { StartSpec } from '../src/lib/desktop';
 import type { Message, Run, Task, TaskEngine } from '../src/lib/types';
 import { actions } from '../src/state/actions';
 import * as live from '../src/state/live';
+import { modelActions } from '../src/state/models';
 import { emptyState } from '../src/state/seed';
 import { store } from '../src/state/store';
 
@@ -386,6 +388,84 @@ console.log("A command policy of 自动 and Claude Code's own safety check");
   store.update((d) => { d.tools.find((t) => t.id === 'shell')!.permission = was; });
 }
 
+console.log('Stopping a chat while its stream id is pending');
+{
+  const originalStart = hooks.start;
+  const pending: Array<{ id: string; resolve: (id: string) => void }> = [];
+  hooks.start = async () => new Promise<string>((resolve) => { pending.push({ id: `cancel-start-${pending.length}`, resolve }); });
+  const emit = (id: string, event: Record<string, unknown>) => hooks.handlers.forEach((h) => h({ id, type: String(event.type), ...event }));
+  const engine: TaskEngine = { kind: 'live', provider: 'deepseek', auth: 'api', model: 'deepseek-flash', label: 'test' };
+  const id = actions.createTask({ title: '取消启动', goal: 'first', kind: 'chat', engine, agentIds: ['orchestrator'], start: true });
+  live.stopReply(id);
+  expect('stop clears the busy state and typing bubble immediately', !live.isReplying(id) && !task(id).messages.some((m) => m.streaming));
+  actions.sendMessage(id, 'new request');
+  eq('a new message can start while the cancelled IPC reply is pending', pending.length, 2);
+  emit(pending[0].id, { type: 'session', sessionId: 'old-session' });
+  emit(pending[0].id, { type: 'text', text: 'OLD RESPONSE' });
+  pending[0].resolve(pending[0].id);
+  await new Promise((r) => setTimeout(r, 10));
+  expect('the cancelled late stream id is stopped', hooks.stops.some((x) => x.id === pending[0].id && x.how === 'kill'));
+  expect('old events cannot replace the new reply or restore its session', live.isReplying(id) && !task(id).session && !task(id).messages.some((m) => m.text.includes('OLD RESPONSE')));
+  emit(pending[0].id, { type: 'error', message: 'OLD ERROR', code: 'SESSION_LOST' });
+  pending[1].resolve(pending[1].id);
+  await new Promise((r) => setTimeout(r, 10));
+  emit(pending[1].id, { type: 'text', text: 'new response' });
+  emit(pending[1].id, { type: 'done', text: '', stopReason: 'stop' });
+  await until('the new reply', () => !live.isReplying(id));
+  expect('the new reply completes and old errors stay ignored', task(id).messages.some((m) => m.text === 'new response') && !task(id).messages.some((m) => m.kind === 'error') && pending.length === 2);
+
+  const deleted = actions.createTask({ title: '删除启动', goal: 'delete me', kind: 'chat', engine, agentIds: ['orchestrator'], start: true });
+  actions.deleteTask(deleted);
+  pending[2].resolve(pending[2].id);
+  await new Promise((r) => setTimeout(r, 10));
+  emit(pending[2].id, { type: 'text', text: 'deleted response' });
+  emit(pending[2].id, { type: 'done', text: '', stopReason: 'stop' });
+  expect('deleting a starting chat stops its late stream and keeps it forgotten', !task(deleted) && !live.isReplying(deleted) && hooks.stops.some((x) => x.id === pending[2].id));
+
+  const partial = actions.createTask({ title: '停止部分回复', goal: 'partial', kind: 'chat', engine, agentIds: ['orchestrator'], start: true });
+  pending[3].resolve(pending[3].id);
+  await new Promise((r) => setTimeout(r, 10));
+  emit(pending[3].id, { type: 'text', text: 'kept partial' });
+  live.stopReply(partial);
+  emit(pending[3].id, { type: 'text', text: ' discarded tail' });
+  emit(pending[3].id, { type: 'done', text: '', stopReason: 'interrupted' });
+  await new Promise((r) => setTimeout(r, 10));
+  expect('stop preserves the received partial text and rejects late text', !live.isReplying(partial) && task(partial).messages.at(-1)?.text === 'kept partial' && !task(partial).messages.some((m) => m.streaming));
+  hooks.start = originalStart;
+}
+
+console.log('Connection tests belong to the configuration that started them');
+{
+  const originalTest = hooks.test;
+  let finish: (result: unknown) => void = () => {};
+  hooks.test = async () => new Promise((resolve) => { finish = resolve; });
+  const original = { ...store.get().models.providers.deepseek };
+  for (const change of ['endpoint', 'model', 'empty-model', 'cli-model', 'key', 'clear-key'] as const) {
+    store.update((d) => { d.models.providers.deepseek = { ...original, keyHint: '••••1234' }; d.toasts = []; });
+    const waiting = modelActions.test('deepseek', 'api');
+    if (change === 'endpoint') modelActions.set('deepseek', { baseUrl: 'https://new.invalid/v1' });
+    if (change === 'model') modelActions.set('deepseek', { model: 'new-model' });
+    if (change === 'empty-model') modelActions.set('deepseek', { model: '' });
+    if (change === 'cli-model') modelActions.set('deepseek', { cliModel: 'new-cli-model' });
+    if (change === 'key') await modelActions.saveKey('deepseek', 'TEST-ONLY');
+    if (change === 'clear-key') await modelActions.clearKey('deepseek');
+    finish({ ok: true, text: 'STALE', ms: 1 });
+    await waiting;
+    expect(`${change}: stale success cannot mark the edited configuration connected`, !store.get().models.providers.deepseek.test && !store.get().toasts.some((t) => t.title.includes('连接正常')));
+  }
+  store.update((d) => { d.models.providers.deepseek = original; });
+  const first = modelActions.test('deepseek', 'api');
+  const finishFirst = finish;
+  const second = modelActions.test('deepseek', 'api');
+  finish({ ok: true, text: 'LATEST', ms: 1 });
+  await second;
+  finishFirst({ ok: false, error: 'OLD FAILURE', ms: 2 });
+  await first;
+  expect('an older failure cannot replace a newer success', store.get().models.providers.deepseek.test?.message.includes('LATEST') === true);
+  hooks.test = originalTest;
+}
+
+failures += await acpPermissionChecks();
 try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* a child may still hold the folder */ }
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll driver checks passed');
 process.exit(failures ? 1 : 0);

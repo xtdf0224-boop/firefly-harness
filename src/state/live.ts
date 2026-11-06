@@ -61,8 +61,9 @@ const ctxOf = (runId: string) => {
   if (!c) { c = { supportsInput: false, approvals: new Map(), gen: 0 }; runCtx.set(runId, c); }
   return c;
 };
-/** Chat replies in flight: taskId → stream id. */
-const chatBusy = new Map<string, string>();
+interface ChatCtx { streamId?: string; cancelled: boolean; cancel?: () => void }
+/** Each reply keeps its own cancellation state while its stream id is still arriving. */
+const chatBusy = new Map<string, ChatCtx>();
 
 /* ───────────── small helpers ───────────── */
 
@@ -100,9 +101,17 @@ export function canAct(engine: TaskEngine, access: 'chat' | 'work') {
   return engine.auth === 'cli' || (engine.auth === 'api' && !!engine.cwd && access === 'work');
 }
 
-/** canAct for a turn of a run: an API model whose service address refused tool calls (run.noTools) only thinks and writes for the rest of that run. */
+function apiToolTarget(spec: StartSpec): string {
+  const protocol = spec.driver === 'api-anthropic' ? 'anthropic' : spec.provider === 'gpt' ? 'responses' : 'chat';
+  return JSON.stringify([spec.provider, protocol, spec.baseUrl?.replace(/\/+$/, ''), spec.model]);
+}
+
+/** A tool refusal applies to the model and service address that returned it. */
 function actsIn(engine: TaskEngine, access: 'chat' | 'work', run?: Run) {
-  return canAct(engine, access) && !(run?.noTools && isApi(engine));
+  if (!canAct(engine, access)) return false;
+  if (!run || !isApi(engine)) return true;
+  const spec = baseSpec(engine);
+  return !spec.ok || !run.noToolsFor?.includes(apiToolTarget(spec.value));
 }
 
 /** The base of a StartSpec for a task's engine: which program or URL, model, key, folder. */
@@ -191,6 +200,12 @@ const BROWSER_NOTE = '\n\n## 浏览器\n你可以用 firefly-browser 的 browser
 
 /** What a 只读 task may never do. */
 const READ_ONLY_BLOCK = new Set<ToolId>(['write_file', 'shell', 'git', 'browser_act']);
+
+/** The three gates on a workbench tool: switched off in 工具与技能, blocked in a 只读 task, not in the Agent's own list (`only`;
+    'other' is never held by it). apiToolsFor, policySpec and stepToolsOf share it, so the plan roster cannot drift from them. */
+function toolBlocked(id: ToolId, readOnly: boolean, only?: ToolId[]) {
+  return s().tools.find((t) => t.id === id)?.permission === 'off' || (readOnly && READ_ONLY_BLOCK.has(id)) || (!!only && id !== 'other' && !only.includes(id));
+}
 /** Claude Code already reads inside its folders (cwd + --add-dir) without asking; leaving these out of
     --allowedTools makes a read anywhere else come back as a permission request. */
 const CLAUDE_READS = new Set(['Read', 'NotebookRead', 'Grep', 'Glob', 'LS']);
@@ -206,16 +221,15 @@ function policySpec(spec: StartSpec, engine: TaskEngine, access: 'chat' | 'work'
   const deny = new Set<string>(CLAUDE_HEADLESS_DENY);
   for (const t of tools) {
     const names = CLAUDE_TOOLS[t.id] ?? [];
-    const blocked = t.permission === 'off' || (readOnly && READ_ONLY_BLOCK.has(t.id)) || (!!only && t.id !== 'other' && !only.includes(t.id));
-    if (blocked) names.forEach((n) => deny.add(n));
+    if (toolBlocked(t.id, readOnly, only)) names.forEach((n) => deny.add(n));
     else if (t.permission === 'auto') names.filter((n) => !CLAUDE_READS.has(n)).forEach((n) => allow.add(n));
   }
   spec.allow = [...allow];
   spec.deny = [...deny];
-  const writeOff = tools.find((t) => t.id === 'write_file')?.permission === 'off' || (!!only && !only.includes('write_file'));
+  const writeOff = toolBlocked('write_file', false, only);
   const cfg = s().models.providers[engine.provider];
   spec.sandbox = readOnly || writeOff ? 'read-only' : cfg.codexSandbox === 'danger-full-access' ? 'danger-full-access' : 'workspace-write';
-  spec.webSearch = tools.find((t) => t.id === 'web_search')?.permission !== 'off' && (!only || only.includes('web_search'));
+  spec.webSearch = !toolBlocked('web_search', false, only);
   return spec;
 }
 
@@ -310,7 +324,7 @@ interface TurnOpts {
   view?: (raw: string) => string;
   eager?: boolean;
   /** A chat reply: tracked in chatBusy so a second message waits for it. */
-  chat?: boolean;
+  chat?: ChatCtx;
   /** A CLI turn of an agent on its own model: its session id goes to task.agentSessions[agent]. */
   sessionAgent?: AgentId;
   /** Tool categories this agent may use (its Agent-page list); others are refused. */
@@ -387,7 +401,7 @@ function preview(category: ToolId, name: string, input: Record<string, unknown>,
 }
 
 function runTurn(o: TurnOpts): Promise<TurnResult> {
-  const k: Sink = { taskId: o.task.id, runId: o.runId, agentId: o.agentId, kind: o.kind, persona: o.agentId === 'orchestrator' ? voice() : undefined, view: o.view, raw: '', all: '', think: '', eager: o.eager, single: o.chat };
+  const k: Sink = { taskId: o.task.id, runId: o.runId, agentId: o.agentId, kind: o.kind, persona: o.agentId === 'orchestrator' ? voice() : undefined, view: o.view, raw: '', all: '', think: '', eager: o.eager, single: !!o.chat };
   const calls = new Map<string, string>(); // CLI call id → our ToolCall id
   let plan: TurnResult['plan'];
   let myId = '';
@@ -397,6 +411,10 @@ function runTurn(o: TurnOpts): Promise<TurnResult> {
   if (k.eager) sinkFlush(k);
 
   return new Promise<TurnResult>((resolve, reject) => {
+    if (o.chat) o.chat.cancel = () => {
+      sinkBreak(k);
+      resolve({ text: k.all.trim(), stopReason: 'interrupted' });
+    };
     const withRun = (fn: (d: D, run: Draft<Run>) => void) => {
       if (!o.runId) return;
       store.update((d) => { const run = d.runs[o.runId!]; if (run) fn(d, run); });
@@ -421,6 +439,7 @@ function runTurn(o: TurnOpts): Promise<TurnResult> {
     };
 
     const on = (ev: StreamEvent) => {
+      if (o.chat?.cancelled) return;
       switch (ev.type) {
         case 'session':
           store.update((d) => {
@@ -547,8 +566,12 @@ function runTurn(o: TurnOpts): Promise<TurnResult> {
     // The id arrives before any buffered events are replayed, so permission requests can be answered.
     const onId = (id: string) => {
       myId = id;
-      if (o.chat) chatBusy.set(o.task.id, id);
-      if (!o.runId || o.chat) return;
+      if (o.chat) {
+        o.chat.streamId = id;
+        if (o.chat.cancelled) void desktop?.stop(id, 'kill');
+        return;
+      }
+      if (!o.runId) return;
       const c = ctxOf(o.runId);
       c.streamId = id;
       // An API tool turn takes supplements between its requests (docs/API-TOOLS.md §6).
@@ -558,7 +581,11 @@ function runTurn(o: TurnOpts): Promise<TurnResult> {
       // Paused or cancelled while the program was starting: stop it straight away.
       if (!r || !(r.status === 'running' || r.status === 'awaiting') || c.halt) void desktop?.stop(id, r?.status === 'paused' ? 'interrupt' : 'kill');
     };
-    openStream(o.spec, on, onId).catch((e: Error) => { sinkBreak(k); reject(e); });
+    openStream(o.spec, on, onId).catch((e: Error) => {
+      if (o.chat?.cancelled) return;
+      sinkBreak(k);
+      reject(e);
+    });
   });
 }
 
@@ -575,27 +602,32 @@ function dropSession(taskId: string, agent?: AgentId) {
 
 /** The desktop side's codes for an API tool turn that the service address cannot do: no /responses (GPT), or no `tools` at all. */
 const NO_TOOLS_CODES = ['NO_RESPONSES', 'NO_TOOLS'];
-const NO_TOOLS_MESSAGE = '这个服务地址不支持工具调用，这次改为只思考和写作。';
 
 /** runTurn; if the CLI reports the session it was told to resume as lost, run the turn once more in a
     new session. `fresh` builds that spec: with no session id, and with everything the old session knew
     in its prompt. Only one retry: the second turn has no session to lose.
-    An API tool turn that the service refuses (NO_TOOLS_CODES) moves the whole run to think-and-write (run.noTools, kept with the run,
-    said in the conversation): the turn is run once more without tools, and `fresh` builds it so, as every later turn is built. */
+    An API tool refusal is saved for that provider, protocol, endpoint and model. The turn is retried
+    once without tools; other models in the run keep their own capabilities. */
 async function runTurnResuming(o: TurnOpts, fresh: () => Result<StartSpec>): Promise<TurnResult> {
   try {
     return await runTurn(o);
   } catch (e) {
     const err = e as Error & { code?: string };
+    if (o.chat?.cancelled) throw e;
     if (NO_TOOLS_CODES.includes(err.code ?? '') && o.spec.tools?.length && o.runId && !o.chat) {
       const runId = o.runId;
       if (halted(runId)) throw e;
+      const message = err.code === 'NO_RESPONSES'
+        ? '当前 GPT 服务地址缺少工作任务使用的 Responses 接口。此模型在该地址的后续步骤改为文字回复，无法生成本地文件。请在「模型接入」换用支持 Responses 工具调用的地址后重新运行。'
+        : '当前模型或服务地址拒绝了工具调用。此模型在该地址的后续步骤改为文字回复，无法生成本地文件。请在「模型接入」选择支持工具调用的模型和地址后重新运行。';
       store.update((d) => {
         const run = d.runs[runId];
         if (!run) return;
-        run.noTools = true;
-        d.tasks[o.task.id]?.messages.push({ id: uid('msg'), role: 'system', runId, at: now(), text: NO_TOOLS_MESSAGE });
-        pushEvent(d, { runId, kind: 'agent', level: 'warn', text: NO_TOOLS_MESSAGE });
+        const target = apiToolTarget(o.spec);
+        run.noToolsFor ??= [];
+        if (!run.noToolsFor.includes(target)) run.noToolsFor.push(target);
+        d.tasks[o.task.id]?.messages.push({ id: uid('msg'), role: 'system', runId, at: now(), text: message });
+        pushEvent(d, { runId, kind: 'agent', level: 'warn', text: message });
       });
       const plain = fresh();
       if (!plain.ok || plain.value.tools?.length) throw e;
@@ -615,7 +647,7 @@ async function runTurnResuming(o: TurnOpts, fresh: () => Result<StartSpec>): Pro
 
 /** A CLI agent asks before using a tool: decide by policy, or ask the user. */
 function onPermission(o: TurnOpts, ev: Extract<StreamEvent, { type: 'permission' }>, ensureCall: (d: D, run: Draft<Run>) => Draft<ToolCall> | undefined) {
-  const streamId = o.chat ? chatBusy.get(o.task.id) : o.runId ? ctxOf(o.runId).streamId : undefined;
+  const streamId = o.chat ? o.chat.streamId : o.runId ? ctxOf(o.runId).streamId : undefined;
   const answer = (decision: 'allow' | 'deny') => { if (streamId) void desktop?.answer(streamId, ev.requestId, decision, ev.input); };
   if (!o.runId || o.chat || !streamId) { answer('deny'); return; }
   const category = toolCategory(ev.name, ev.input);
@@ -740,23 +772,43 @@ function unreadBack(taskId: string, runId: string, n: number, how: 'done' | 'err
 /** What the user added to the task after its goal, one line each (planPrompt and briefing both carry it). */
 const supplements = (task: Task) => task.messages.filter((m) => m.role === 'user' && m.text !== task.goal).map((m) => `- ${m.text}`).join('\n');
 
-/** `act`: the planning model can look around the working folder (canAct) — it is also told which helpers can work in it. */
+/** `act`: the planning model can look around the working folder (canAct) — it is also told which helpers can work in it, and with
+    which tools each one's steps will run (stepToolsOf), so a step that needs a tool goes to an Agent that has it. */
 function planPrompt(task: Task, run: Run | undefined, act: boolean) {
   const st = s();
   const ids = rosterOf(task);
+  const kit = new Map(ids.map((id) => [id, stepToolsOf(task, run, id)] as const));
+  const wantsSlides = /pptx?|powerpoint|演示文稿|幻灯片/i.test([task.goal, supplements(task)].join('\n'));
+  const toolText = (id: AgentId) => {
+    const tools = kit.get(id);
+    if (!tools) return '';
+    const engine = run?.agentEngines?.[id] ?? task.engine;
+    const deck = wantsSlides && engine && isApi(engine) && tools.includes('write_file')
+      ? '；需要交付 PPT 时，可用 create_presentation 在本地生成可编辑的 .pptx' : '';
+    return tools.length ? `执行时能用的工具：${tools.map((t) => st.tools.find((x) => x.id === t)?.name ?? t).join('、')}${deck}` : '执行时没有可用的工具，只能思考和写作';
+  };
+  const solo = ids.length <= 1 ? toolText('orchestrator') : '';
   const roster = ids.length <= 1
-    ? `- orchestrator：你自己（这次由你一个人${act ? '在工作文件夹里' : ''}完成全部步骤）`
+    ? `- orchestrator：你自己（这次由你一个人${act ? '在工作文件夹里' : ''}完成全部步骤${solo ? `；${solo}` : ''}）`
     : ids.map((id) => {
       const a = st.agents.find((x) => x.id === id);
       const own = run?.agentEngines?.[id];
       const how = id === 'orchestrator' ? '你自己' : own ? `用 ${own.label}${actsIn(own, 'work', run) ? '，能在工作文件夹里动手' : '，只能思考和写作，不能动文件'}` : act ? '由你以这个角色完成' : '';
-      return `- ${id}：${a?.name ?? id}，${a?.role ?? ''}${how ? `（${how}）` : ''}`;
+      const note = [how, toolText(id)].filter(Boolean).join('；');
+      return `- ${id}：${a?.name ?? id}，${a?.role ?? ''}${note ? `（${note}）` : ''}`;
     }).join('\n');
+  // The rule only means something when some Agent lists a tool.
+  const listed = [...kit.values()].filter((tools): tools is ToolId[] => !!tools?.length);
+  const browserNamed = listed.some((tools) => tools.some(isBrowserTool));
+  const assign = ids.length > 1 && listed.length
+    ? `每一步执行时只能用分派到的那个 Agent 能用的工具${browserNamed ? '（「浏览网页」「操作网页」指萤火浏览器）' : ''}：需要某个工具的步骤，请派给列出了这个工具的 Agent。`
+    : '';
   const extras = supplements(task);
   return [
     `任务目标：\n${task.goal}`,
     extras ? `补充说明：\n${extras}` : '',
     `可以分派的 Agent：\n${roster}`,
+    assign,
     '请先用你的口吻说一两句话（不超过 60 字），然后给出 2 到 6 步的执行计划，放在一个 ```json 代码块里，格式：',
     '{"steps":[{"title":"不超过 14 个字","detail":"一句话：这一步做什么、产出什么","agent":"orchestrator"}]}',
     act ? '你可以先只读地了解一下工作文件夹里的情况，但这一轮不要修改任何文件，也不要开始执行。' : '这一轮只做计划，不要开始执行。',
@@ -813,19 +865,17 @@ function stepPrompt(run: Run, i: number, extras: string[], act: boolean) {
 
 /** The workbench's own tools an API model may be given, in a fixed order. Never 'other': that is a command-line agent's own extras. */
 const API_TOOLS: ToolId[] = ['read_file', 'code_search', 'write_file', 'shell', 'git', 'web_search', 'web_fetch', 'browser_read', 'browser_act'];
+const isBrowserTool = (id: ToolId) => id === 'browser_read' || id === 'browser_act';
 
 /** The tool categories an API turn gets (docs/API-TOOLS.md §7): none that 工具与技能 disables, no write in a 只读 task, only the
     agent's own picks (`own`), the browser only when the task opened it. The plan turn may only look: read_file and code_search. */
 export function apiToolsFor(engine: TaskEngine, purpose: PromptPurpose, own?: ToolId[]): ToolId[] {
-  const policy = s().tools;
   const readOnly = engine.access === 'read';
   const browser = browserOn(engine);
   return API_TOOLS.filter((id) => {
-    if (policy.find((t) => t.id === id)?.permission === 'off') return false;
-    if (readOnly && READ_ONLY_BLOCK.has(id)) return false;
-    if (own && !own.includes(id)) return false;
+    if (toolBlocked(id, readOnly, own)) return false;
     if (purpose === 'plan') return id === 'read_file' || id === 'code_search';
-    return browser || (id !== 'browser_read' && id !== 'browser_act');
+    return browser || !isBrowserTool(id);
   });
 }
 
@@ -858,6 +908,11 @@ function specFor(task: Task, run: Run, purpose: PromptPurpose, agent: AgentId, p
       ? systemPrompt(purpose === 'plan' || purpose === 'step' ? 'cli' : purpose, promptContext(task, 'cli'))
       : rolePrompt(agent, callName(), 'tools', engine.cwd);
     spec.system = withSkills(head, skillText) + (engine.access === 'read' ? READ_ONLY_NOTE : '') + (browser ? BROWSER_NOTE : '') + (tools.length ? '' : NO_TOOLS_NOTE);
+    if (purpose === 'step' && /pptx?|powerpoint|演示文稿|幻灯片/i.test(task.goal + '\n' + prompt) && !tools.includes('write_file')) {
+      spec.system += engine.access === 'read'
+        ? '\n如这一步需要创建 PPT，请说明任务是只读的，需改用「按工具策略」并允许「写入文件」。'
+        : '\n如这一步需要创建 PPT，请说明本 Agent 没有「写入文件」工具，请检查「工具与技能」和 Agent 页的勾选。';
+    }
     spec.messages = [{ role: 'user', content: prompt }];
     if (!tools.length) { delete spec.cwd; return ok(spec); }
     const info = PROVIDER_BY_ID[engine.provider];
@@ -896,6 +951,41 @@ const toolsOf = (agent: AgentId): ToolId[] | undefined => {
   const a: Agent | undefined = s().agents.find((x) => x.id === agent);
   return agent === 'orchestrator' || !a ? undefined : a.tools;
 };
+
+/** The tool categories a step of `agent` really has in this run, by what stepTurn starts it with: on its own model (Agent page) or
+    the task's. An API model gets apiToolsFor(…, 'step', its list). A command-line one has what its driver enforces (the Agent page's
+    note says the same). Claude Code and the ACP agents keep every gate (allow / deny lists, a question per call), but there git needs
+    the command tool: Claude Code's bare Bash / PowerShell deny takes Bash(git:*) with it, and an ACP agent's question may come without
+    the command text (Kimi Code sends it only in a later update), so its git is judged as a command. Codex follows only its sandbox and
+    the web-search switch: its shell reads and searches anyway, git works only where the sandbox can write (.git is written), it has no
+    fetch tool, and the firefly-browser MCP server is all or nothing. DeepSeek Harness follows none of them: only its read-only mode in
+    a 只读 task, and it takes no browser. When unsure, a tool is left out: the roster may understate, never promise.
+    null: the step cannot act at all (it only thinks and writes). The plan prompt lists these per Agent. */
+function stepToolsOf(task: Task, run: Run | undefined, agent: AgentId): ToolId[] | null {
+  const own = agent !== 'orchestrator' ? run?.agentEngines?.[agent] : undefined;
+  const engine = own ?? task.engine;
+  if (!engine || !actsIn(engine, 'work', run)) return null;
+  const only = toolsOf(agent);
+  if (isApi(engine)) return apiToolsFor(engine, 'step', only);
+  const readOnly = engine.access === 'read';
+  const driver = engine.driver ?? s().models.providers[engine.provider]?.driver;
+  // specFor's useBrowser: the MCP server is handed over when the task opened the browser and the Agent lists either browser tool.
+  const browser = browserOn(engine) && (!only || only.includes('browser_read') || only.includes('browser_act'));
+  if (driver === 'dsh') return API_TOOLS.filter((id) => !isBrowserTool(id) && !(readOnly && READ_ONLY_BLOCK.has(id)));
+  if (driver === 'codex') {
+    // policySpec's sandbox: read-only in a 只读 task or when the Agent may not write.
+    const canWrite = !readOnly && !toolBlocked('write_file', false, only);
+    return API_TOOLS.filter((id) => {
+      if (isBrowserTool(id)) return browser;
+      if (id === 'write_file' || id === 'git') return canWrite;
+      if (id === 'web_search') return !toolBlocked('web_search', false, only);
+      if (id === 'web_fetch') return false;
+      return !(readOnly && READ_ONLY_BLOCK.has(id));
+    });
+  }
+  const out = API_TOOLS.filter((id) => !toolBlocked(id, readOnly, only) && (!isBrowserTool(id) || browser));
+  return out.includes('shell') ? out : out.filter((id) => id !== 'git');
+}
 
 /** The CLI session a turn runs in: 'task' (the task's own), an agent id (its own CLI model), or '' for API turns. */
 function sessionKey(run: Run, agent: AgentId, engine: TaskEngine): string {
@@ -1499,21 +1589,23 @@ export async function reply(taskId: string, opts: { nudge?: boolean; greet?: boo
     fresh = () => ok({ ...spec, sessionId: undefined, prompt: cliPrompt(true) });
   }
   const started = now();
-  chatBusy.set(taskId, 'starting');
+  const chat: ChatCtx = { cancelled: false };
+  chatBusy.set(taskId, chat);
   try {
-    await runTurnResuming({ task, runId: opts.followUp ? lastRun?.id : undefined, agentId: 'orchestrator', kind: opts.followUp ? 'reply' : undefined, spec, eager: true, chat: true }, fresh);
+    await runTurnResuming({ task, runId: opts.followUp ? lastRun?.id : undefined, agentId: 'orchestrator', kind: opts.followUp ? 'reply' : undefined, spec, eager: true, chat }, fresh);
   } catch (e) {
+    if (chat.cancelled) return;
     store.update((d) => {
       d.tasks[taskId]?.messages.push({ id: uid('msg'), role: 'agent', agentId: 'orchestrator', kind: 'error', at: now(), persona: v,
         text: `${v === 'sam' ? '通信中断。' : v === 'firefly' ? '抱歉……我没能回复。' : '没能回复。'}${(e as Error).message}` });
       toast(d, { tone: 'danger', title: '回复失败', body: (e as Error).message.slice(0, 140), key: `chat:${taskId}` });
     });
   } finally {
-    chatBusy.delete(taskId);
+    if (chatBusy.get(taskId) === chat) chatBusy.delete(taskId);
   }
   // Messages that arrived while she was replying (or greeting) get their own answer.
   const after = s().tasks[taskId];
-  if (after && after.messages.some((m) => m.role === 'user' && m.at > started)) void reply(taskId, hint ? {} : opts);
+  if (!chat.cancelled && after && after.messages.some((m) => m.role === 'user' && m.at > started)) void reply(taskId, hint ? {} : opts);
 }
 
 /** The conversation before index `upTo`, as plain text for a CLI session that starts without it. */
@@ -1529,8 +1621,12 @@ function transcript(task: Task, upTo: number) {
 
 /** Stop the reply being written in a chat (keeps what has arrived so far). */
 export function stopReply(taskId: string) {
-  const id = chatBusy.get(taskId);
-  if (id && id !== 'starting') void desktop?.stop(id, 'kill');
+  const chat = chatBusy.get(taskId);
+  if (!chat) return;
+  chat.cancelled = true;
+  chat.cancel?.();
+  if (chat.streamId) void desktop?.stop(chat.streamId, 'kill');
+  chatBusy.delete(taskId);
 }
 
 /** Drop her last answer and ask again. */
@@ -1566,6 +1662,8 @@ export function normalizeAfterLoad(d: D) {
     for (const m of t.messages) if (m.streaming) m.streaming = false;
   }
   for (const r of Object.values(d.runs)) {
+    // Older saves cannot identify which API target rejected tools. Probe each target again.
+    delete r.noTools;
     for (const a of r.approvals) if (a.status === 'pending') a.status = 'expired';
     for (const c of r.toolCalls) if (c.status === 'running' || c.status === 'awaiting') Object.assign(c, { status: 'cancelled' });
     for (const st of r.plan) if (st.status === 'awaiting') st.status = 'running';
