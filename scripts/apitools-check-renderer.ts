@@ -503,7 +503,8 @@ export async function rendererChecks() {
   }
 
   section('A service that cannot do tool calls: the turn is run again without tools, and so is the rest of the run');
-  const NO_TOOLS_MSG = '这个服务地址不支持工具调用，这次改为只思考和写作。';
+  const NO_RESPONSES_MSG = '当前 GPT 服务地址缺少工作任务使用的 Responses 接口。本次 API 步骤改为文字回复，无法生成本地文件。请在「模型接入」换用支持 Responses 工具调用的地址后重新运行。';
+  const NO_TOOLS_MSG = '当前模型或服务地址拒绝了工具调用。本次 API 步骤改为文字回复，无法生成本地文件。请在「模型接入」选择支持工具调用的模型和地址后重新运行。';
   const planOnly = (planText: string): Script => async (spec, id) => {
     if (spec.tools) { emit(id, { type: 'error', message: '这个服务地址不支持 Responses 接口，不能调用工具。', code: 'NO_RESPONSES' }); return; }
     emit(id, { type: 'text', text: planText });
@@ -516,8 +517,8 @@ export async function rendererChecks() {
     await doneRun(id);
     const r = runOf(id);
     eq('the run completes (the plan turn did not fail it)', r.status, 'completed');
-    expect('the run is marked tool-less, and the person is told', r.noTools === true && tasks()[id].messages.filter((m: Any) => m.role === 'system' && m.text === NO_TOOLS_MSG).length === 1);
-    expect('…also on the timeline', store.get().events.some((e: Any) => e.runId === r.id && e.text === NO_TOOLS_MSG));
+    expect('the run is marked tool-less, and the person is told', r.noTools === true && tasks()[id].messages.filter((m: Any) => m.role === 'system' && m.text === NO_RESPONSES_MSG).length === 1);
+    expect('…also on the timeline', store.get().events.some((e: Any) => e.runId === r.id && e.text === NO_RESPONSES_MSG));
     expect('the plan turn was tried with tools first, then run once more without', specs.length >= 2 && !!specs[0].tools && specs[1].tools === undefined, specs.map((s) => !!s.tools));
     const [, p, s1, s2, sum] = specs;
     expect('the second try is a plain turn: no folder, no access, no confirmAll', p.cwd === undefined && p.access === undefined && p.confirmAll === undefined && p.readOnly === undefined);

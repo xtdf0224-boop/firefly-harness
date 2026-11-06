@@ -580,7 +580,6 @@ function dropSession(taskId: string, agent?: AgentId) {
 
 /** The desktop side's codes for an API tool turn that the service address cannot do: no /responses (GPT), or no `tools` at all. */
 const NO_TOOLS_CODES = ['NO_RESPONSES', 'NO_TOOLS'];
-const NO_TOOLS_MESSAGE = '这个服务地址不支持工具调用，这次改为只思考和写作。';
 
 /** runTurn; if the CLI reports the session it was told to resume as lost, run the turn once more in a
     new session. `fresh` builds that spec: with no session id, and with everything the old session knew
@@ -595,12 +594,15 @@ async function runTurnResuming(o: TurnOpts, fresh: () => Result<StartSpec>): Pro
     if (NO_TOOLS_CODES.includes(err.code ?? '') && o.spec.tools?.length && o.runId && !o.chat) {
       const runId = o.runId;
       if (halted(runId)) throw e;
+      const message = err.code === 'NO_RESPONSES'
+        ? '当前 GPT 服务地址缺少工作任务使用的 Responses 接口。本次 API 步骤改为文字回复，无法生成本地文件。请在「模型接入」换用支持 Responses 工具调用的地址后重新运行。'
+        : '当前模型或服务地址拒绝了工具调用。本次 API 步骤改为文字回复，无法生成本地文件。请在「模型接入」选择支持工具调用的模型和地址后重新运行。';
       store.update((d) => {
         const run = d.runs[runId];
         if (!run) return;
         run.noTools = true;
-        d.tasks[o.task.id]?.messages.push({ id: uid('msg'), role: 'system', runId, at: now(), text: NO_TOOLS_MESSAGE });
-        pushEvent(d, { runId, kind: 'agent', level: 'warn', text: NO_TOOLS_MESSAGE });
+        d.tasks[o.task.id]?.messages.push({ id: uid('msg'), role: 'system', runId, at: now(), text: message });
+        pushEvent(d, { runId, kind: 'agent', level: 'warn', text: message });
       });
       const plain = fresh();
       if (!plain.ok || plain.value.tools?.length) throw e;
@@ -751,10 +753,14 @@ function planPrompt(task: Task, run: Run | undefined, act: boolean) {
   const st = s();
   const ids = rosterOf(task);
   const kit = new Map(ids.map((id) => [id, stepToolsOf(task, run, id)] as const));
+  const wantsSlides = /pptx?|powerpoint|演示文稿|幻灯片/i.test([task.goal, supplements(task)].join('\n'));
   const toolText = (id: AgentId) => {
     const tools = kit.get(id);
     if (!tools) return '';
-    return tools.length ? `执行时能用的工具：${tools.map((t) => st.tools.find((x) => x.id === t)?.name ?? t).join('、')}` : '执行时没有可用的工具，只能思考和写作';
+    const engine = run?.agentEngines?.[id] ?? task.engine;
+    const deck = wantsSlides && engine && isApi(engine) && tools.includes('write_file')
+      ? '；需要交付 PPT 时，可用 create_presentation 在本地生成可编辑的 .pptx' : '';
+    return tools.length ? `执行时能用的工具：${tools.map((t) => st.tools.find((x) => x.id === t)?.name ?? t).join('、')}${deck}` : '执行时没有可用的工具，只能思考和写作';
   };
   const solo = ids.length <= 1 ? toolText('orchestrator') : '';
   const roster = ids.length <= 1
@@ -877,6 +883,11 @@ function specFor(task: Task, run: Run, purpose: PromptPurpose, agent: AgentId, p
       ? systemPrompt(purpose === 'plan' || purpose === 'step' ? 'cli' : purpose, promptContext(task, 'cli'))
       : rolePrompt(agent, callName(), 'tools', engine.cwd);
     spec.system = withSkills(head, skillText) + (engine.access === 'read' ? READ_ONLY_NOTE : '') + (browser ? BROWSER_NOTE : '') + (tools.length ? '' : NO_TOOLS_NOTE);
+    if (purpose === 'step' && /pptx?|powerpoint|演示文稿|幻灯片/i.test(task.goal + '\n' + prompt) && !tools.includes('write_file')) {
+      spec.system += engine.access === 'read'
+        ? '\n如这一步需要创建 PPT，请说明任务是只读的，需改用「按工具策略」并允许「写入文件」。'
+        : '\n如这一步需要创建 PPT，请说明本 Agent 没有「写入文件」工具，请检查「工具与技能」和 Agent 页的勾选。';
+    }
     spec.messages = [{ role: 'user', content: prompt }];
     if (!tools.length) { delete spec.cwd; return ok(spec); }
     const info = PROVIDER_BY_ID[engine.provider];

@@ -480,6 +480,35 @@ async function ensureParent(real) {
   if (!P.sameLocation(rp, dir)) throw Object.assign(new Error('moved'), { code: 'ECHANGED' });
 }
 
+/** Publish a verified deck only under a new name. A concurrent creator keeps its file. */
+async function createPresentation(args, ctx, signal) {
+  const presentation = require('./presentation.cjs');
+  const bad = presentation.check(args.path, args.slides);
+  if (bad) return fail(bad);
+  if (!args.expect || args.expect.exists) return fail('需要先确认一个新的 .pptx 路径。');
+  if (aborted(signal)) return fail(STOPPED);
+  const first = await guard(args.path, ctx, 'write', args.expect);
+  if (first.error) return fail(first.error);
+  const buf = await presentation.render(args.slides);
+  const over = budgetError(ctx, buf.length);
+  if (over) return fail(over);
+  if (aborted(signal)) return fail(STOPPED);
+  await ensureParent(first.r.real);
+  const tmp = path.join(path.dirname(first.r.real), `.ff-ppt-${crypto.randomBytes(12).toString('hex')}.tmp`);
+  const file = await fsp.open(tmp, 'wx');
+  try {
+    try { await file.writeFile(buf); } finally { await file.close(); }
+    const current = await guard(args.path, ctx, 'write', args.expect);
+    if (current.error) return fail(current.error);
+    if (aborted(signal)) return fail(STOPPED);
+    await fsp.copyFile(tmp, current.r.real, fs.constants.COPYFILE_EXCL);
+    budgetOf(ctx).used += buf.length;
+    return done(`已生成并校验 ${args.slides.length} 页 PowerPoint：${current.r.real}（${P.sizeText(buf.length)}）。`);
+  } finally {
+    await fsp.unlink(tmp).catch(() => {});
+  }
+}
+
 /** The first `n` bytes of a file. */
 async function readHead(real, n) {
   const fh = await fsp.open(real, 'r');
@@ -759,6 +788,7 @@ const safe = (fn) => async (args, ctx, signal) => {
   try { return await fn(args && typeof args === 'object' ? args : {}, ctx, signal); } catch (e) { return fail(`内部错误：${(e && e.message) || e}`); }
 };
 const tools = {
+  create_presentation: safe(createPresentation),
   read_file: safe(readFile), list_directory: safe(listDirectory), glob: safe(glob), search_file_content: safe(search), write_file: safe(writeFile), edit_file: safe(editFile),
 };
 

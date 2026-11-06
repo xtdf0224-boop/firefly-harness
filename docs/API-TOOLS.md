@@ -60,6 +60,7 @@
 | `glob` | code_search | `pattern`（相对写法，如 `src/**/*.ts`）, `path?`（起始目录） | 最多 500 个结果，按路径排序；跳过敏感文件 |
 | `search_file_content` | code_search | `pattern`（正则，非法时按字面）, `path?`, `glob?`, `ignore_case?` | 在 worker 线程里跑，20 秒后终止；跳过大于 1 MB 和二进制文件、第 4.4 节的目录、敏感文件；最多扫 20000 个文件、返回 200 条 `相对路径:行号: 内容`（每行最多 300 字） |
 | `write_file` | write_file | `path`, `content`, `append?` | 只能写工作文件夹里；自动建父目录；UTF-8 无 BOM；一次内容最大 2 MB，写后文件最大 50 MB |
+| `create_presentation` | write_file | `path`, `slides: [{title, bullets}]` | 在工作文件夹内新建并校验可编辑的 .pptx。支持 1 至 40 页，每页最多 6 条要点。遵循「写入文件」审批，只读任务不可用，同名文件必须另存。 |
 | `edit_file` | write_file | `path`, `old_string`, `new_string`, `replace_all?` | 精确替换；找不到、或找到多处而没有 `replace_all` 时报错并说明找到几处；文件用 CRLF 而参数用 LF 时按 CRLF 匹配和写回；文件最大 10 MB |
 | `run_shell_command` | shell（第 4.5 节的纯 git 命令是 git） | `command`, `timeout?`（秒，默认 120，范围 1–600） | 第 4.5 节 |
 | `web_fetch` | web_fetch | `url` | 第 4.6 节；HTML 转纯文本，最多 20000 字 |

@@ -428,7 +428,7 @@ export function toolCategory(name: string, input?: Record<string, unknown>): imp
   // A command is git only when it is nothing but one plain git command: `git status; curl …` and `git log (Start-Process calc)` are shell commands.
   if (/^(bash|powershell|shell|execute|run_shell_command|exec_command|local_shell)$/.test(n)) return isPureGit(cmd) ? 'git' : 'shell';
   if (/^(read|notebookread|read_file|read_many_files)$/.test(n)) return 'read_file';
-  if (/^(write|edit|multiedit|notebookedit|apply_patch|write_file|replace|edit_file)$/.test(n)) return 'write_file';
+  if (/^(write|edit|multiedit|notebookedit|apply_patch|write_file|replace|edit_file|create_presentation)$/.test(n)) return 'write_file';
   if (/^(grep|glob|ls|search|code_search|list_directory|search_file_content|find)$/.test(n)) return 'code_search';
   if (/^(websearch|web_search|google_web_search)$/.test(n)) return 'web_search';
   if (/^(webfetch|web_fetch|fetch)$/.test(n)) return 'web_fetch';

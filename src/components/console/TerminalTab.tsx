@@ -16,7 +16,7 @@ const NOTE = {
   both: '命令行 Agent 和 API 模型执行的命令与输出',
   tools: 'API 模型用萤火的工具执行的命令与输出',
   api: '这个任务没有工作文件夹，API 模型只思考和写作，不会执行命令；这里只显示系统消息',
-  noTools: '这个服务地址不支持工具调用，这次 API 模型只思考和写作，不会执行命令；这里只显示系统消息',
+  noTools: '本次 API 步骤已改为文字回复。请查看任务里的系统消息，了解服务地址或模型拒绝工具调用的原因。',
 };
 
 export function TerminalTab({ runId }: { runId?: string }) {
