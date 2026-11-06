@@ -61,8 +61,9 @@ const ctxOf = (runId: string) => {
   if (!c) { c = { supportsInput: false, approvals: new Map(), gen: 0 }; runCtx.set(runId, c); }
   return c;
 };
-/** Chat replies in flight: taskId → stream id. */
-const chatBusy = new Map<string, string>();
+interface ChatCtx { streamId?: string; cancelled: boolean; cancel?: () => void }
+/** Each reply keeps its own cancellation state while its stream id is still arriving. */
+const chatBusy = new Map<string, ChatCtx>();
 
 /* ───────────── small helpers ───────────── */
 
@@ -100,9 +101,17 @@ export function canAct(engine: TaskEngine, access: 'chat' | 'work') {
   return engine.auth === 'cli' || (engine.auth === 'api' && !!engine.cwd && access === 'work');
 }
 
-/** canAct for a turn of a run: an API model whose service address refused tool calls (run.noTools) only thinks and writes for the rest of that run. */
+function apiToolTarget(spec: StartSpec): string {
+  const protocol = spec.driver === 'api-anthropic' ? 'anthropic' : spec.provider === 'gpt' ? 'responses' : 'chat';
+  return JSON.stringify([spec.provider, protocol, spec.baseUrl?.replace(/\/+$/, ''), spec.model]);
+}
+
+/** A tool refusal applies to the model and service address that returned it. */
 function actsIn(engine: TaskEngine, access: 'chat' | 'work', run?: Run) {
-  return canAct(engine, access) && !(run?.noTools && isApi(engine));
+  if (!canAct(engine, access)) return false;
+  if (!run || !isApi(engine)) return true;
+  const spec = baseSpec(engine);
+  return !spec.ok || !run.noToolsFor?.includes(apiToolTarget(spec.value));
 }
 
 /** The base of a StartSpec for a task's engine: which program or URL, model, key, folder. */
@@ -315,7 +324,7 @@ interface TurnOpts {
   view?: (raw: string) => string;
   eager?: boolean;
   /** A chat reply: tracked in chatBusy so a second message waits for it. */
-  chat?: boolean;
+  chat?: ChatCtx;
   /** A CLI turn of an agent on its own model: its session id goes to task.agentSessions[agent]. */
   sessionAgent?: AgentId;
   /** Tool categories this agent may use (its Agent-page list); others are refused. */
@@ -392,7 +401,7 @@ function preview(category: ToolId, name: string, input: Record<string, unknown>,
 }
 
 function runTurn(o: TurnOpts): Promise<TurnResult> {
-  const k: Sink = { taskId: o.task.id, runId: o.runId, agentId: o.agentId, kind: o.kind, persona: o.agentId === 'orchestrator' ? voice() : undefined, view: o.view, raw: '', all: '', think: '', eager: o.eager, single: o.chat };
+  const k: Sink = { taskId: o.task.id, runId: o.runId, agentId: o.agentId, kind: o.kind, persona: o.agentId === 'orchestrator' ? voice() : undefined, view: o.view, raw: '', all: '', think: '', eager: o.eager, single: !!o.chat };
   const calls = new Map<string, string>(); // CLI call id → our ToolCall id
   let plan: TurnResult['plan'];
   let myId = '';
@@ -402,6 +411,10 @@ function runTurn(o: TurnOpts): Promise<TurnResult> {
   if (k.eager) sinkFlush(k);
 
   return new Promise<TurnResult>((resolve, reject) => {
+    if (o.chat) o.chat.cancel = () => {
+      sinkBreak(k);
+      resolve({ text: k.all.trim(), stopReason: 'interrupted' });
+    };
     const withRun = (fn: (d: D, run: Draft<Run>) => void) => {
       if (!o.runId) return;
       store.update((d) => { const run = d.runs[o.runId!]; if (run) fn(d, run); });
@@ -426,6 +439,7 @@ function runTurn(o: TurnOpts): Promise<TurnResult> {
     };
 
     const on = (ev: StreamEvent) => {
+      if (o.chat?.cancelled) return;
       switch (ev.type) {
         case 'session':
           store.update((d) => {
@@ -552,8 +566,12 @@ function runTurn(o: TurnOpts): Promise<TurnResult> {
     // The id arrives before any buffered events are replayed, so permission requests can be answered.
     const onId = (id: string) => {
       myId = id;
-      if (o.chat) chatBusy.set(o.task.id, id);
-      if (!o.runId || o.chat) return;
+      if (o.chat) {
+        o.chat.streamId = id;
+        if (o.chat.cancelled) void desktop?.stop(id, 'kill');
+        return;
+      }
+      if (!o.runId) return;
       const c = ctxOf(o.runId);
       c.streamId = id;
       // An API tool turn takes supplements between its requests (docs/API-TOOLS.md §6).
@@ -563,7 +581,11 @@ function runTurn(o: TurnOpts): Promise<TurnResult> {
       // Paused or cancelled while the program was starting: stop it straight away.
       if (!r || !(r.status === 'running' || r.status === 'awaiting') || c.halt) void desktop?.stop(id, r?.status === 'paused' ? 'interrupt' : 'kill');
     };
-    openStream(o.spec, on, onId).catch((e: Error) => { sinkBreak(k); reject(e); });
+    openStream(o.spec, on, onId).catch((e: Error) => {
+      if (o.chat?.cancelled) return;
+      sinkBreak(k);
+      reject(e);
+    });
   });
 }
 
@@ -584,23 +606,26 @@ const NO_TOOLS_CODES = ['NO_RESPONSES', 'NO_TOOLS'];
 /** runTurn; if the CLI reports the session it was told to resume as lost, run the turn once more in a
     new session. `fresh` builds that spec: with no session id, and with everything the old session knew
     in its prompt. Only one retry: the second turn has no session to lose.
-    An API tool turn that the service refuses (NO_TOOLS_CODES) moves the whole run to think-and-write (run.noTools, kept with the run,
-    said in the conversation): the turn is run once more without tools, and `fresh` builds it so, as every later turn is built. */
+    An API tool refusal is saved for that provider, protocol, endpoint and model. The turn is retried
+    once without tools; other models in the run keep their own capabilities. */
 async function runTurnResuming(o: TurnOpts, fresh: () => Result<StartSpec>): Promise<TurnResult> {
   try {
     return await runTurn(o);
   } catch (e) {
     const err = e as Error & { code?: string };
+    if (o.chat?.cancelled) throw e;
     if (NO_TOOLS_CODES.includes(err.code ?? '') && o.spec.tools?.length && o.runId && !o.chat) {
       const runId = o.runId;
       if (halted(runId)) throw e;
       const message = err.code === 'NO_RESPONSES'
-        ? '当前 GPT 服务地址缺少工作任务使用的 Responses 接口。本次 API 步骤改为文字回复，无法生成本地文件。请在「模型接入」换用支持 Responses 工具调用的地址后重新运行。'
-        : '当前模型或服务地址拒绝了工具调用。本次 API 步骤改为文字回复，无法生成本地文件。请在「模型接入」选择支持工具调用的模型和地址后重新运行。';
+        ? '当前 GPT 服务地址缺少工作任务使用的 Responses 接口。此模型在该地址的后续步骤改为文字回复，无法生成本地文件。请在「模型接入」换用支持 Responses 工具调用的地址后重新运行。'
+        : '当前模型或服务地址拒绝了工具调用。此模型在该地址的后续步骤改为文字回复，无法生成本地文件。请在「模型接入」选择支持工具调用的模型和地址后重新运行。';
       store.update((d) => {
         const run = d.runs[runId];
         if (!run) return;
-        run.noTools = true;
+        const target = apiToolTarget(o.spec);
+        run.noToolsFor ??= [];
+        if (!run.noToolsFor.includes(target)) run.noToolsFor.push(target);
         d.tasks[o.task.id]?.messages.push({ id: uid('msg'), role: 'system', runId, at: now(), text: message });
         pushEvent(d, { runId, kind: 'agent', level: 'warn', text: message });
       });
@@ -622,7 +647,7 @@ async function runTurnResuming(o: TurnOpts, fresh: () => Result<StartSpec>): Pro
 
 /** A CLI agent asks before using a tool: decide by policy, or ask the user. */
 function onPermission(o: TurnOpts, ev: Extract<StreamEvent, { type: 'permission' }>, ensureCall: (d: D, run: Draft<Run>) => Draft<ToolCall> | undefined) {
-  const streamId = o.chat ? chatBusy.get(o.task.id) : o.runId ? ctxOf(o.runId).streamId : undefined;
+  const streamId = o.chat ? o.chat.streamId : o.runId ? ctxOf(o.runId).streamId : undefined;
   const answer = (decision: 'allow' | 'deny') => { if (streamId) void desktop?.answer(streamId, ev.requestId, decision, ev.input); };
   if (!o.runId || o.chat || !streamId) { answer('deny'); return; }
   const category = toolCategory(ev.name, ev.input);
@@ -1564,21 +1589,23 @@ export async function reply(taskId: string, opts: { nudge?: boolean; greet?: boo
     fresh = () => ok({ ...spec, sessionId: undefined, prompt: cliPrompt(true) });
   }
   const started = now();
-  chatBusy.set(taskId, 'starting');
+  const chat: ChatCtx = { cancelled: false };
+  chatBusy.set(taskId, chat);
   try {
-    await runTurnResuming({ task, runId: opts.followUp ? lastRun?.id : undefined, agentId: 'orchestrator', kind: opts.followUp ? 'reply' : undefined, spec, eager: true, chat: true }, fresh);
+    await runTurnResuming({ task, runId: opts.followUp ? lastRun?.id : undefined, agentId: 'orchestrator', kind: opts.followUp ? 'reply' : undefined, spec, eager: true, chat }, fresh);
   } catch (e) {
+    if (chat.cancelled) return;
     store.update((d) => {
       d.tasks[taskId]?.messages.push({ id: uid('msg'), role: 'agent', agentId: 'orchestrator', kind: 'error', at: now(), persona: v,
         text: `${v === 'sam' ? '通信中断。' : v === 'firefly' ? '抱歉……我没能回复。' : '没能回复。'}${(e as Error).message}` });
       toast(d, { tone: 'danger', title: '回复失败', body: (e as Error).message.slice(0, 140), key: `chat:${taskId}` });
     });
   } finally {
-    chatBusy.delete(taskId);
+    if (chatBusy.get(taskId) === chat) chatBusy.delete(taskId);
   }
   // Messages that arrived while she was replying (or greeting) get their own answer.
   const after = s().tasks[taskId];
-  if (after && after.messages.some((m) => m.role === 'user' && m.at > started)) void reply(taskId, hint ? {} : opts);
+  if (!chat.cancelled && after && after.messages.some((m) => m.role === 'user' && m.at > started)) void reply(taskId, hint ? {} : opts);
 }
 
 /** The conversation before index `upTo`, as plain text for a CLI session that starts without it. */
@@ -1594,8 +1621,12 @@ function transcript(task: Task, upTo: number) {
 
 /** Stop the reply being written in a chat (keeps what has arrived so far). */
 export function stopReply(taskId: string) {
-  const id = chatBusy.get(taskId);
-  if (id && id !== 'starting') void desktop?.stop(id, 'kill');
+  const chat = chatBusy.get(taskId);
+  if (!chat) return;
+  chat.cancelled = true;
+  chat.cancel?.();
+  if (chat.streamId) void desktop?.stop(chat.streamId, 'kill');
+  chatBusy.delete(taskId);
 }
 
 /** Drop her last answer and ask again. */
@@ -1631,6 +1662,8 @@ export function normalizeAfterLoad(d: D) {
     for (const m of t.messages) if (m.streaming) m.streaming = false;
   }
   for (const r of Object.values(d.runs)) {
+    // Older saves cannot identify which API target rejected tools. Probe each target again.
+    delete r.noTools;
     for (const a of r.approvals) if (a.status === 'pending') a.status = 'expired';
     for (const c of r.toolCalls) if (c.status === 'running' || c.status === 'awaiting') Object.assign(c, { status: 'cancelled' });
     for (const st of r.plan) if (st.status === 'awaiting') st.status = 'running';

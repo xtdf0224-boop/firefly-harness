@@ -1044,4 +1044,8 @@ export async function toolChecks() {
   await webChecks();
   providerChecks();
   await tableChecks();
+  section('Browser cancellation: queued and in-progress actions');
+  await req('./scripts/browser-cancel-check.cjs')({ req, tools: T, fakeBrowser, eq, expect });
+  section('Skills import: validate the staged copy before replacing an installed skill');
+  await req('./scripts/skills-import-check.cjs')({ req, tmp, rm, write, eq, expect });
 }

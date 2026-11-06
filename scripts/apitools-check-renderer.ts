@@ -11,6 +11,7 @@ import { hooks } from './driver-check-env';
 import { actions } from '../src/state/actions';
 import { workHint } from '../src/components/views/tasks/Composer';
 import * as live from '../src/state/live';
+import { loadState } from '../src/state/persist';
 import { emptyState } from '../src/state/seed';
 import { store } from '../src/state/store';
 import type { AgentId } from '../src/lib/types';
@@ -502,9 +503,9 @@ export async function rendererChecks() {
     script = {};
   }
 
-  section('A service that cannot do tool calls: the turn is run again without tools, and so is the rest of the run');
-  const NO_RESPONSES_MSG = '当前 GPT 服务地址缺少工作任务使用的 Responses 接口。本次 API 步骤改为文字回复，无法生成本地文件。请在「模型接入」换用支持 Responses 工具调用的地址后重新运行。';
-  const NO_TOOLS_MSG = '当前模型或服务地址拒绝了工具调用。本次 API 步骤改为文字回复，无法生成本地文件。请在「模型接入」选择支持工具调用的模型和地址后重新运行。';
+  section('A service that cannot do tool calls: later turns on the same model and endpoint use text');
+  const NO_RESPONSES_MSG = '当前 GPT 服务地址缺少工作任务使用的 Responses 接口。此模型在该地址的后续步骤改为文字回复，无法生成本地文件。请在「模型接入」换用支持 Responses 工具调用的地址后重新运行。';
+  const NO_TOOLS_MSG = '当前模型或服务地址拒绝了工具调用。此模型在该地址的后续步骤改为文字回复，无法生成本地文件。请在「模型接入」选择支持工具调用的模型和地址后重新运行。';
   const planOnly = (planText: string): Script => async (spec, id) => {
     if (spec.tools) { emit(id, { type: 'error', message: '这个服务地址不支持 Responses 接口，不能调用工具。', code: 'NO_RESPONSES' }); return; }
     emit(id, { type: 'text', text: planText });
@@ -517,7 +518,7 @@ export async function rendererChecks() {
     await doneRun(id);
     const r = runOf(id);
     eq('the run completes (the plan turn did not fail it)', r.status, 'completed');
-    expect('the run is marked tool-less, and the person is told', r.noTools === true && tasks()[id].messages.filter((m: Any) => m.role === 'system' && m.text === NO_RESPONSES_MSG).length === 1);
+    expect('the refusing target is recorded, and the person is told', r.noToolsFor?.length === 1 && !r.noTools && tasks()[id].messages.filter((m: Any) => m.role === 'system' && m.text === NO_RESPONSES_MSG).length === 1);
     expect('…also on the timeline', store.get().events.some((e: Any) => e.runId === r.id && e.text === NO_RESPONSES_MSG));
     expect('the plan turn was tried with tools first, then run once more without', specs.length >= 2 && !!specs[0].tools && specs[1].tools === undefined, specs.map((s) => !!s.tools));
     const [, p, s1, s2, sum] = specs;
@@ -563,6 +564,77 @@ export async function rendererChecks() {
     await doneRun(id2);
     expect('another error code fails the run as before: one try, not marked tool-less, nothing said', runOf(id2).status === 'failed' && specs.length === 1 && !runOf(id2).noTools && !tasks()[id2].messages.some((m: Any) => m.text === NO_TOOLS_MSG));
     script = {};
+  }
+
+  section('Tool refusals stay with their provider, endpoint and model');
+  {
+    const reviewer = store.get().agents.find((a) => a.id === 'reviewer')!;
+    const previousEngine = reviewer.engine;
+    const previousBase = store.get().models.providers.deepseek.baseUrl;
+    let reloadSnapshot: Any;
+    let reloadTaskId = '';
+    for (const variant of ['provider', 'model', 'endpoint'] as const) {
+      reset();
+      store.update((d) => {
+        const agent = d.agents.find((a) => a.id === 'reviewer')!;
+        agent.engine = variant === 'provider'
+          ? { key: 'qwen:api', model: 'qwen3.7-plus' }
+          : { key: 'deepseek:api', model: variant === 'model' ? 'another-deepseek-model' : engineOf().model };
+      });
+      script = {
+        step1: async (spec, streamId) => {
+          if (spec.tools) {
+            emit(streamId, { type: 'error', message: 'tools not supported', code: 'NO_TOOLS' });
+            return;
+          }
+          if (variant === 'endpoint') store.update((d) => { d.models.providers.deepseek.baseUrl = 'https://alternate.invalid/v1'; });
+          emit(streamId, { type: 'text', text: '仅完成文字说明。' });
+          emit(streamId, { type: 'done', text: '', stopReason: 'stop' });
+        },
+      };
+      const id = create(`isolated-${variant}`, `拒绝隔离 ${variant}`, engineOf(), ['orchestrator', 'reviewer']);
+      await doneRun(id);
+      const helper = specs[3];
+      expect(`${variant}: only the original target is recorded`, runOf(id).status === 'completed' && runOf(id).noToolsFor?.length === 1);
+      expect(`${variant}: the helper's tools follow its own target`, !!helper.tools?.length, helper);
+      if (variant === 'provider') eq('a Qwen helper retains tools after DeepSeek refuses them', helper.provider, 'qwen');
+      if (variant === 'model') eq('a different model at the same endpoint retains tools', helper.model, 'another-deepseek-model');
+      if (variant === 'endpoint') eq('the same model at a new endpoint retains tools', helper.baseUrl, 'https://alternate.invalid/v1');
+      if (variant === 'provider') {
+        reloadSnapshot = JSON.parse(JSON.stringify(store.get()));
+        reloadTaskId = id;
+      }
+      store.update((d) => { d.models.providers.deepseek.baseUrl = previousBase; });
+    }
+    store.update((d) => { d.agents.find((a) => a.id === 'reviewer')!.engine = previousEngine; });
+    script = {};
+
+    const beforeReload = store.get();
+    const savedBefore = localStorage.getItem('firefly-harness/v1');
+    for (const scoped of [false, true]) {
+      reset();
+      const saved = JSON.parse(JSON.stringify(reloadSnapshot));
+      const runId = saved.tasks[reloadTaskId].runIds.at(-1);
+      const run = saved.runs[runId];
+      run.status = 'running';
+      run.noTools = true;
+      if (!scoped) delete run.noToolsFor;
+      for (const step of run.plan) step.status = 'pending';
+      localStorage.setItem('firefly-harness/v1', JSON.stringify({
+        version: 1, rev: 2, tasks: saved.tasks, taskOrder: saved.taskOrder, runs: saved.runs, events: saved.events,
+      }));
+      store.init(loadState(Date.now()));
+      store.update((d) => { d.models.providers.deepseek.keyHint = '••••1234'; d.models.providers.qwen.keyHint = '••••1234'; });
+      expect(`reload (${scoped ? 'scoped' : 'legacy'}): the old global flag is removed`, !Object.hasOwn(store.get().runs[runId], 'noTools'));
+      eq('reload keeps any target-specific capability cache', store.get().runs[runId].noToolsFor, run.noToolsFor);
+      expect('the loaded run resumes through the normal entry point', live.resumeLive(runId).ok);
+      await doneRun(reloadTaskId);
+      expect('a legacy cache is probed again; a scoped refusal still applies to its original target', scoped ? !specs[0].tools : !!specs[0].tools?.length);
+      expect('the loaded run retains Qwen tools after either cache format', specs[1].provider === 'qwen' && !!specs[1].tools?.length && runOf(reloadTaskId).status === 'completed');
+    }
+    store.init(beforeReload);
+    if (savedBefore === null) localStorage.removeItem('firefly-harness/v1');
+    else localStorage.setItem('firefly-harness/v1', savedBefore);
   }
 
   section('The plan is found in the whole reply when the last message has none');

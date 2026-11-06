@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const secrets = require('./secrets.cjs');
+const { redactedEmitter } = require('./redact.cjs');
 const { resolveCommand, forgetCommand, installDirs, runOnce, isWin, spawnCli, killTree, expandVars, SYS32, cmdExe } = require('./proc.cjs');
 const { streamOpenAI, streamAnthropic, toolProtocol } = require('./api.cjs');
 const { runAgent } = require('./agent.cjs');
@@ -147,15 +148,6 @@ function checkDir(dir) {
   try { return fs.statSync(dir).isDirectory() ? dir : null; } catch { return null; }
 }
 
-/** Replace every occurrence of a secret in an event's strings. */
-function scrub(value, secret) {
-  if (!secret) return value;
-  if (typeof value === 'string') return value.split(secret).join('••••');
-  if (Array.isArray(value)) return value.map((v) => scrub(v, secret));
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, scrub(v, secret)]));
-  return value;
-}
-
 /* ───────────── streamed runs ───────────── */
 
 const streams = new Map(); // id → { ctl, sender }
@@ -221,7 +213,7 @@ function watchSender(sender) {
 function startStream(sender, spec) {
   watchSender(sender);
   const id = `s${Date.now().toString(36)}${(++streamSeq).toString(36)}`;
-  const emit = (ev) => { if (!sender.isDestroyed()) sender.send('ai:event', { id, ...ev }); };
+  let emit = (ev) => { if (!sender.isDestroyed()) sender.send('ai:event', { id, ...ev }); };
   const entry = { ctl: null, sender };
   streams.set(id, entry);
   const end = () => { streams.delete(id); };
@@ -240,6 +232,7 @@ function startStream(sender, spec) {
     if (!baseUrl) return fail('服务地址必须是 https:// 开头。');
     const key = secrets.get(provider);
     if (!key) return fail('还没有保存这个服务的 API Key。');
+    emit = redactedEmitter(emit, key);
     if (!spec.model) return fail('请先选择模型。');
     const apiSpec = { ...spec, baseUrl, extraBody: cleanExtra(spec.extraBody) };
     // A 工作 turn that names tools: the model works with the workbench's own tools (agent.cjs). Everything else, chat, the
@@ -249,7 +242,7 @@ function startStream(sender, spec) {
     if (work && work.error) return fail(work.error, work.code);
     if (work) {
       // The key is never sent to the page, and neither is anything a command or a page printed that contains it.
-      const agent = runAgent({ spec: apiSpec, key, emit: (ev) => emit(scrub(ev, key)), protocol, ctx: work.ctx });
+      const agent = runAgent({ spec: apiSpec, key, emit, protocol, ctx: work.ctx });
       entry.ctl = { answer: agent.answer, send: agent.send, interrupt: agent.interrupt, stop: agent.stop };
       agent.done.then(end, end);
       return id;
@@ -279,14 +272,13 @@ function startStream(sender, spec) {
   for (const [k, v] of Object.entries(spec.env || {})) {
     if (ENV_KEYS.test(k) && typeof v === 'string' && v.length < 2000) env[k] = v;
   }
-  let emitOut = emit;
   if (spec.keyEnv) {
     if (!KEY_ENVS.has(spec.keyEnv)) return fail('不支持的密钥变量。');
     const key = secrets.get(provider);
     if (!key) return fail('这个方式需要 API Key，请先在「模型接入」里保存。');
     env[spec.keyEnv] = key;
     // The agent's shell inherits the key; never let it come back to the page (tool output, text…).
-    emitOut = (ev) => emit(scrub(ev, key));
+    emit = redactedEmitter(emit, key);
   }
   if (spec.sessionId && !/^[\w.:-]{1,100}$/.test(String(spec.sessionId))) return fail('会话 ID 格式不对。');
   if (env.ANTHROPIC_BASE_URL && !safeBaseUrl(env.ANTHROPIC_BASE_URL)) return fail('服务地址必须是 https:// 开头。');
@@ -308,7 +300,7 @@ function startStream(sender, spec) {
   // Model names go on the command line: letters, digits and . _ - : / [ ] only.
   if (spec.model && !/^[\w.\-:/[\]]{1,100}$/.test(String(spec.model))) return fail('模型名里有不支持的字符。');
   const common = { exe, cwd, prompt: String(spec.prompt || ''), system: spec.system ? String(spec.system) : '', sessionId: spec.sessionId || undefined, model: spec.model || undefined, effort: spec.effort || undefined, env };
-  const emitCli = emitOut;
+  const emitCli = emit;
   const tail = () => end();
   // 浏览器控制: hand the agent the firefly-browser MCP server (not in chat, not for DSH).
   const ep = spec.browser && spec.access !== 'chat' && !spec.readOnly && driverId !== 'dsh' ? browser.getEndpoint() : null;

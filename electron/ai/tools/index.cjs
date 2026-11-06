@@ -475,7 +475,7 @@ async function dispatch(name, input, ctx, signal) {
     const msg = `这一轮的截图已经用完了（最多 ${MAX_SHOTS} 张）。请改用 browser_snapshot 读取页面文字。`;
     return { ok: false, output: msg, display: msg };
   }
-  if (BROWSER_NAMES.has(name)) return browserTools.call(name, given);
+  if (BROWSER_NAMES.has(name)) return browserTools.call(name, given, signal);
   return { ok: false, output: `不认识的工具：${shortName(name)}`, display: `不认识的工具：${shortName(name)}` };
 }
 

@@ -352,8 +352,10 @@ export interface Run {
   engineLabel?: string;
   /** Agents that ran on their own model in this run (snapshot taken when the run started). */
   agentEngines?: Partial<Record<AgentId, TaskEngine>>;
-  /** An API model's tool call was refused by its service address (no /responses, no `tools`): the run's API turns think and write only from then on. */
+  /** @deprecated Legacy capability cache without a target, discarded when loading saved runs. */
   noTools?: boolean;
+  /** Provider, protocol, endpoint and model combinations that rejected tools in this run. */
+  noToolsFor?: string[];
   /** Which done steps each CLI session has been told about ('task' = the task's own session, or an
    *  agent id): results produced elsewhere are handed to a session once, before its next turn. */
   shown?: Record<string, string[]>;

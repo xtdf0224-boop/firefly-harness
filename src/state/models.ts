@@ -22,6 +22,7 @@ export function initialModels(): ModelState {
 
 /** The message a connection test shows while it is running. */
 export const TESTING = '测试中…';
+const pendingTests = new Map<ProviderId, symbol>();
 
 /** A path typed or pasted into 命令路径: surrounding blanks and one pair of quotes (「复制为路径」 adds them) are dropped. */
 export function cleanPath(raw: string) {
@@ -101,7 +102,10 @@ export const modelActions = {
         if (values.cliPath === undefined) c.cliPath = '';
         c.cliModel = PROVIDER_BY_ID[id].cliModels[c.driver]?.[0]?.id ?? '';
       }
-      if (values.driver || values.cliPath !== undefined || values.region || values.baseUrl !== undefined || values.model) c.test = undefined;
+      if (values.driver !== undefined || values.cliPath !== undefined || values.region !== undefined || values.baseUrl !== undefined || values.model !== undefined || values.cliModel !== undefined) {
+        pendingTests.delete(id);
+        c.test = undefined;
+      }
     });
     // Switching to the CLI way (or changing which CLI) checks it right away.
     const c = store.get().models.providers[id];
@@ -114,6 +118,7 @@ export const modelActions = {
     if (!desktop) return false;
     const r = await desktop.saveKey(id, key);
     if (!r.ok) { feedback('danger', '没能保存密钥', r.error); return false; }
+    pendingTests.delete(id);
     patch(id, (c) => { c.keyHint = r.hint; c.test = undefined; });
     feedback('success', '密钥已加密保存', `${PROVIDER_BY_ID[id].name} · ${r.hint}`);
     return true;
@@ -121,6 +126,7 @@ export const modelActions = {
   async clearKey(id: ProviderId) {
     if (!desktop) return;
     await desktop.clearKey(id);
+    pendingTests.delete(id);
     patch(id, (c) => { c.keyHint = undefined; c.test = undefined; });
     feedback('info', '密钥已删除', PROVIDER_BY_ID[id].name);
   },
@@ -138,10 +144,15 @@ export const modelActions = {
     const c = store.get().models.providers[id];
     const ready = readiness(p, c, auth);
     if (!ready.ready) { feedback('warning', '还不能测试', ready.reason); return; }
+    const request = Symbol();
+    pendingTests.set(id, request);
     patch(id, (x) => { x.test = { ok: false, at: Date.now(), ms: 0, message: TESTING, auth, driver: auth === 'cli' ? c.driver : undefined }; });
     const spec = testSpec(id, auth);
     let r: Awaited<ReturnType<typeof desktop.test>>;
     try { r = await desktop.test(spec); } catch (e) { r = { ok: false, ms: 0, error: e instanceof Error ? e.message : String(e) }; }
+    if (pendingTests.get(id) !== request) return;
+    pendingTests.delete(id);
+    if (JSON.stringify(testSpec(id, auth)) !== JSON.stringify(spec)) return;
     patch(id, (x) => {
       x.test = r.ok
         ? { ok: true, at: Date.now(), ms: r.ms, message: `回复「${r.text || '（空）'}」${r.model ? ` · ${r.model}` : ''}`, auth, driver: auth === 'cli' ? c.driver : undefined }

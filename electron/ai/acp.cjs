@@ -98,10 +98,16 @@ function runAcp(spec, emit) {
       if (msg.method === 'session/request_permission' && msg.id !== undefined) {
         const p = msg.params || {};
         const options = Array.isArray(p.options) ? p.options : [];
-        const allow = options.find((o) => o.kind === 'allow_once') || options.find((o) => o.kind === 'allow_always');
-        const reject = options.find((o) => o.kind === 'reject_once') || options.find((o) => o.kind === 'reject_always');
+        // The workbench approves or rejects this call only. Never turn that answer into a lasting policy.
+        const allow = options.find((o) => o && o.kind === 'allow_once' && typeof o.optionId === 'string' && o.optionId);
+        const reject = options.find((o) => o && o.kind === 'reject_once' && typeof o.optionId === 'string' && o.optionId);
         const reply = (optionId) => send({ id: msg.id, result: { outcome: optionId ? { outcome: 'selected', optionId } : { outcome: 'cancelled' } } });
         if (spec.access === 'chat') { reply(reject && reject.optionId); return; }
+        if (!allow) {
+          reply(undefined);
+          emit({ type: 'notice', level: 'warn', text: `${label} 没有提供“仅本次允许”选项，这次操作已取消。` });
+          return;
+        }
         const tc = p.toolCall || {};
         const known = calls.get(tc.toolCallId) || {};
         const requestId = `acp_${msg.id}`;

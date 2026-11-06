@@ -413,7 +413,12 @@ async function snapshot(wc) {
 
 const KEYS = new Set(['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', 'Space']);
 
-async function press(wc, key) {
+function checkStopped(signal) {
+  if (signal && signal.aborted) throw Object.assign(new Error('浏览器操作已停止。'), { code: 'ABORTED' });
+}
+
+async function press(wc, key, signal) {
+  checkStopped(signal);
   const keyCode = key === 'Space' ? ' ' : key;
   wc.sendInputEvent({ type: 'keyDown', keyCode });
   if (key === 'Enter') wc.sendInputEvent({ type: 'char', keyCode: '\r' });
@@ -425,7 +430,8 @@ async function press(wc, key) {
 const text = (t) => ({ content: [{ type: 'text', text: String(t) }] });
 const fail = (t) => ({ content: [{ type: 'text', text: String(t) }], isError: true });
 
-async function run(tool, args) {
+async function run(tool, args, signal) {
+  checkStopped(signal);
   ensureWindow(true);
   const wc = pageContents();
   if (!wc) return fail('萤火浏览器窗口已关闭。');
@@ -436,6 +442,7 @@ async function run(tool, args) {
       if (!/^https?:\/\//i.test(url)) return fail('只能打开 http:// 或 https:// 开头的网址。');
       const blocked = await navigationBlock(url);
       if (blocked) return fail(blocked);
+      checkStopped(signal);
       try { await within(wc.loadURL(url), 30000, '打开网页'); } catch (e) {
         if (e.code === 'TIMEOUT') { wc.stop(); return fail(`网页 30 秒还没打开，已停止加载：${url}`); }
         if (/ERR_BLOCKED_BY_CLIENT/.test(String(e.message))) return fail(PRIVATE_NOTE);
@@ -453,6 +460,7 @@ async function run(tool, args) {
       if (!c) return fail(`找不到 ref=${ref}，页面可能已经变化，请重新 browser_snapshot。`);
       await sleep(120);
       const c2 = (await js(wc, centerJs(ref))) || c;
+      checkStopped(signal);
       for (const type of ['mouseMove', 'mouseDown', 'mouseUp']) wc.sendInputEvent({ type, x: c2.x, y: c2.y, button: 'left', clickCount: 1 });
       await sleep(600);
       await waitLoad(wc, 15000);
@@ -464,15 +472,16 @@ async function run(tool, args) {
       if (focus === 'secret') return fail(SECRET_REFUSAL);
       if (focus === 'unfocused') return fail(`ref=${ref} 不能输入文字（焦点落不到它上面），请换一个输入框。`);
       if (focus !== 'ok') return fail(`找不到 ref=${ref}，请重新 browser_snapshot。`);
+      checkStopped(signal);
       await within(wc.insertText(String(args.text ?? '').slice(0, 20000)), 10000, '输入文字');
-      if (args.submit) { await press(wc, 'Enter'); await sleep(800); await waitLoad(wc, 15000); }
+      if (args.submit) { await press(wc, 'Enter', signal); await sleep(800); await waitLoad(wc, 15000); }
       return text(await snapshot(wc));
     }
     case 'browser_press': {
       const key = String(args.key || '');
       if (!KEYS.has(key)) return fail(`不支持的按键：${key}。可用：${[...KEYS].join(', ')}`);
       if (EDIT_KEYS.has(key) && (await js(wc, focusedSecretJs))) return fail(SECRET_REFUSAL);
-      await press(wc, key);
+      await press(wc, key, signal);
       await sleep(400);
       return text(await snapshot(wc));
     }
@@ -514,11 +523,12 @@ const ACTION_LABEL = {
 
 /** One action at a time, in order, and none may hold the queue for more than a minute: what the 127.0.0.1
  *  bridge and the app's own API tools both go through. Never rejects (a failure is an `isError` result). */
-function runQueued(tool, args) {
+function runQueued(tool, args, signal) {
   const name = String(tool);
   const job = queue.then(async () => {
+    checkStopped(signal); // An action cancelled while another task held the browser must never start.
     setNote('agent', ACTION_LABEL[name] || '浏览');
-    try { return await within(run(name, args || {}), 60000, '这个浏览器动作'); } finally { setNote('agent', ''); }
+    try { return await within(run(name, args || {}, signal), 60000, '这个浏览器动作'); } finally { setNote('agent', ''); }
   }).catch((e) => fail(`浏览器出错：${e.message}`));
   queue = job.catch(() => {});
   return job;
